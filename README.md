@@ -17,8 +17,8 @@
 
 从 [Releases](https://github.com/kolikoliko/app-proxy/releases) 下载最新的 Windows x64 安装包：
 
-- 推荐普通用户使用 `应用代理_*_x64-setup.exe`（NSIS）。
-- 需要 MSI 部署时使用 `应用代理_*_x64_zh-CN.msi`。
+- 推荐普通用户使用 `AppProxy_*_x64-setup.exe`（NSIS）。
+- 需要 MSI 部署时使用 `AppProxy_*_x64_zh-CN.msi`。
 
 首个版本尚未购买商业代码签名证书，Windows SmartScreen 可能显示“未知发布者”。请只从本仓库 Releases 下载，并核对 Release 中的 SHA-256 校验值。
 
