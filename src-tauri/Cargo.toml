@@ -1,0 +1,45 @@
+[package]
+name = "app-proxy"
+version = "0.1.0"
+description = "A lightweight per-application proxy controller for Windows"
+authors = ["App Proxy contributors"]
+edition = "2021"
+license = "GPL-3.0-or-later"
+
+[lib]
+name = "app_proxy_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+png = "0.17"
+quick-xml = "0.41"
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-dialog = "2"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+windows = { version = "0.61", features = [
+  "ApplicationModel",
+  "Management_Deployment",
+  "Storage_Search",
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Storage_FileSystem",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging"
+] }
+
+[dev-dependencies]
+regex = "1"
