@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
-import { isTauriRuntime, prepareForUpdate, resumeAfterUpdateFailure } from "../lib/bridge";
+import { isTauriRuntime, prepareForUpdate, resumeAfterUpdateFailure, testProxy } from "../lib/bridge";
 
-const FALLBACK_VERSION = "0.2.0";
+const FALLBACK_VERSION = "0.2.2";
 const AUTO_CHECK_KEY = "app-proxy-update-check-v1";
 const AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 
@@ -32,13 +32,27 @@ export type AppUpdater = AppUpdateState & {
   installUpdate: () => Promise<void>;
 };
 
-function errorMessage(reason: unknown) {
+type UpdateConnection = "proxy" | "direct";
+
+function errorMessage(reason: unknown, connection: UpdateConnection = "proxy") {
   const detail = reason instanceof Error ? reason.message : String(reason);
-  return `无法连接 GitHub 更新服务：${detail}。请检查网络、代理端口以及 GitHub 是否可访问。`;
+  return connection === "proxy"
+    ? `无法通过代理连接 GitHub 更新服务：${detail}。请检查代理端口以及 GitHub 是否可访问。`
+    : `代理端口不可用，直连 GitHub 更新服务也失败：${detail}。请检查网络以及 GitHub 是否可访问。`;
+}
+
+async function selectUpdateConnection(proxyUrl: string): Promise<UpdateConnection> {
+  try {
+    const result = await testProxy(proxyUrl);
+    return result.reachable ? "proxy" : "direct";
+  } catch {
+    return "direct";
+  }
 }
 
 export function useAppUpdater(proxyUrl: string, ready: boolean): AppUpdater {
   const pendingUpdate = useRef<Update | null>(null);
+  const pendingConnection = useRef<UpdateConnection>("proxy");
   const autoCheckStarted = useRef(false);
   const [state, setState] = useState<AppUpdateState>({
     phase: "idle",
@@ -51,6 +65,7 @@ export function useAppUpdater(proxyUrl: string, ready: boolean): AppUpdater {
       return;
     }
 
+    let connection: UpdateConnection = "proxy";
     setState((current) => ({ ...current, phase: "checking", progress: undefined, message: undefined }));
     try {
       const [{ getVersion }, { check }] = await Promise.all([
@@ -61,16 +76,18 @@ export function useAppUpdater(proxyUrl: string, ready: boolean): AppUpdater {
       await pendingUpdate.current?.close();
       pendingUpdate.current = null;
 
-      let update: Update | null;
-      try {
-        update = await check({ proxy: proxyUrl, timeout: 15_000 });
-      } catch (proxyError) {
-        try {
-          update = await check({ timeout: 15_000 });
-        } catch {
-          throw proxyError;
-        }
-      }
+      connection = await selectUpdateConnection(proxyUrl);
+      pendingConnection.current = connection;
+      setState((current) => ({
+        ...current,
+        message: connection === "proxy"
+          ? "代理端口可用，正在通过代理连接 GitHub…"
+          : "代理端口不可用，正在回退为直连 GitHub…",
+      }));
+      const update: Update | null = await check(connection === "proxy"
+        ? { proxy: proxyUrl, timeout: 15_000 }
+        : { timeout: 15_000 });
+      const connectionNote = connection === "proxy" ? "已通过代理检查" : "代理不可用，已回退直连";
 
       localStorage.setItem(AUTO_CHECK_KEY, String(Date.now()));
       pendingUpdate.current = update;
@@ -80,14 +97,14 @@ export function useAppUpdater(proxyUrl: string, ready: boolean): AppUpdater {
         availableVersion: update.version,
         notes: update.body,
         publishedAt: update.date,
-        message: `发现新版本 ${update.version}`,
+        message: `发现新版本 ${update.version}（${connectionNote}）`,
       } : {
         phase: "current",
         currentVersion,
-        message: "当前已是最新版本。",
+        message: `当前已是最新版本（${connectionNote}）。`,
       });
     } catch (reason) {
-      setState((current) => ({ ...current, phase: "error", message: errorMessage(reason) }));
+      setState((current) => ({ ...current, phase: "error", message: errorMessage(reason, connection) }));
     }
   }, [proxyUrl]);
 
@@ -118,7 +135,11 @@ export function useAppUpdater(proxyUrl: string, ready: boolean): AppUpdater {
         message: "更新包下载并验签完成。安装时会暂时关闭 TUN，然后重启应用。",
       }));
     } catch (reason) {
-      setState((current) => ({ ...current, phase: "error", message: errorMessage(reason) }));
+      setState((current) => ({
+        ...current,
+        phase: "error",
+        message: errorMessage(reason, pendingConnection.current),
+      }));
     }
   }, []);
 

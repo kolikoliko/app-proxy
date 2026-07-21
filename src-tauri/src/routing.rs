@@ -355,37 +355,28 @@ pub fn build_config(state: &PersistedState) -> Result<Value, String> {
         route_rules.push(json!({"ip_is_private":true, "action":"route", "outbound":"direct"}));
     }
     if !process_paths.is_empty() {
-        let mut app_rule = json!({
-            "process_path": process_paths,
-            "action":"route",
-            "outbound":"proxy"
-        });
-        if is_http {
-            app_rule["network"] = json!("tcp");
-        }
-        route_rules.push(app_rule);
+        push_app_rules(
+            &mut route_rules,
+            "process_path",
+            json!(process_paths),
+            is_http,
+        );
     }
     if !process_names.is_empty() {
-        let mut app_rule = json!({
-            "process_name": process_names,
-            "action":"route",
-            "outbound":"proxy"
-        });
-        if is_http {
-            app_rule["network"] = json!("tcp");
-        }
-        route_rules.push(app_rule);
+        push_app_rules(
+            &mut route_rules,
+            "process_name",
+            json!(process_names),
+            is_http,
+        );
     }
     if !process_path_regex.is_empty() {
-        let mut app_group_rule = json!({
-            "process_path_regex": process_path_regex,
-            "action":"route",
-            "outbound":"proxy"
-        });
-        if is_http {
-            app_group_rule["network"] = json!("tcp");
-        }
-        route_rules.push(app_group_rule);
+        push_app_rules(
+            &mut route_rules,
+            "process_path_regex",
+            json!(process_path_regex),
+            is_http,
+        );
     }
 
     let mut inbound = json!({
@@ -409,11 +400,38 @@ pub fn build_config(state: &PersistedState) -> Result<Value, String> {
 
     Ok(json!({
         "log":{"level":"warn", "timestamp":true},
-        "dns":{"servers":[{"type":"local", "tag":"local-dns"}], "final":"local-dns"},
+        "dns":{
+            "servers":[{"type":"local", "tag":"local-dns"}],
+            "final":"local-dns",
+            "reverse_mapping":true
+        },
         "inbounds":[inbound],
         "outbounds":[proxy_outbound, {"type":"direct", "tag":"direct"}],
         "route":{"auto_detect_interface":true, "rules":route_rules, "final":"direct"}
     }))
+}
+
+fn push_app_rules(route_rules: &mut Vec<Value>, selector: &str, values: Value, is_http: bool) {
+    let mut sniff_rule = json!({
+        "action":"sniff",
+        "sniffer": if is_http { json!(["http", "tls"]) } else { json!(["http", "tls", "quic"]) },
+        "timeout":"300ms"
+    });
+    sniff_rule[selector] = values.clone();
+    if is_http {
+        sniff_rule["network"] = json!("tcp");
+    }
+    route_rules.push(sniff_rule);
+
+    let mut proxy_rule = json!({
+        "action":"route",
+        "outbound":"proxy"
+    });
+    proxy_rule[selector] = values;
+    if is_http {
+        proxy_rule["network"] = json!("tcp");
+    }
+    route_rules.push(proxy_rule);
 }
 
 fn executable_scope_regex(scope_root: &str) -> Option<String> {
@@ -518,6 +536,7 @@ fn protocol_note(proxy_url: &str) -> Option<String> {
 mod tests {
     use super::{build_config, check_config, sing_box_path, validate_cidr};
     use crate::store::{AppRule, PersistedState};
+    use serde_json::json;
 
     fn state(proxy: &str) -> PersistedState {
         let mut state = PersistedState::default();
@@ -544,14 +563,18 @@ mod tests {
         let config = build_config(&state("socks://127.0.0.1:7890")).unwrap();
         assert_eq!(config["outbounds"][0]["type"], "socks");
         assert_eq!(config["route"]["final"], "direct");
+        assert_eq!(config["dns"]["reverse_mapping"], true);
         assert_eq!(
             config["route"]["rules"][2]["process_path"][0],
             r"C:\Program Files\Browser\browser.exe"
         );
+        assert_eq!(config["route"]["rules"][2]["action"], "sniff");
+        assert_eq!(config["route"]["rules"][2]["sniffer"][2], "quic");
         assert_eq!(
-            config["route"]["rules"][3]["process_name"][0],
+            config["route"]["rules"][5]["process_name"][0],
             "browser.exe"
         );
+        assert_eq!(config["route"]["rules"][5]["outbound"], "proxy");
         assert!(
             config["inbounds"][0]["route_exclude_address"]
                 .as_array()
@@ -567,6 +590,12 @@ mod tests {
         assert_eq!(config["outbounds"][0]["type"], "http");
         assert_eq!(config["route"]["rules"][2]["network"], "tcp");
         assert_eq!(config["route"]["rules"][3]["network"], "tcp");
+        assert_eq!(
+            config["route"]["rules"][2]["sniffer"],
+            json!(["http", "tls"])
+        );
+        assert_eq!(config["route"]["rules"][4]["network"], "tcp");
+        assert_eq!(config["route"]["rules"][5]["network"], "tcp");
     }
 
     #[test]
@@ -579,7 +608,7 @@ mod tests {
         state.rules[0].scope_executable_count = 8;
 
         let config = build_config(&state).unwrap();
-        let pattern = config["route"]["rules"][2]["process_path_regex"][0]
+        let pattern = config["route"]["rules"][3]["process_path_regex"][0]
             .as_str()
             .unwrap();
         let regex = regex::Regex::new(pattern).unwrap();

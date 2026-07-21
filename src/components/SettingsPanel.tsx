@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Clock3, LoaderCircle, Palette, ShieldCheck, TriangleAlert } from "lucide-react";
+import { CheckCircle2, Clock3, LoaderCircle, Palette, ShieldCheck } from "lucide-react";
 import type { AccentColor, AppSettings, ProxyTestResult, TunStatus } from "../types";
 import type { AppUpdater } from "../hooks/useAppUpdater";
 import { Switch } from "./Switch";
@@ -82,11 +82,11 @@ export function SettingsPanel({ settings, testing, testResult, tunStatus, update
           </div>
         ) : null}
         {tunStatus.protocolNote ? <p className="hint">{tunStatus.protocolNote}</p> : null}
-        <div className="proxy-mode-notice" role="note">
-          <TriangleAlert size={17} />
+        <div className="proxy-mode-notice proxy-mode-notice--compatible" role="note">
+          <ShieldCheck size={17} />
           <span>
-            <strong>Clash / Mihomo 请使用全局模式</strong>
-            如需所选应用的全部流量强制使用代理节点，请将上游代理软件切换为全局模式；规则模式仍可能把部分域名、IP 或 QUIC 流量判定为 DIRECT。
+            <strong>Clash / Mihomo 支持规则和全局模式</strong>
+            TUN 会恢复 HTTP、TLS 和 QUIC 目标域名供上游匹配。若仍被自定义规则判定为 DIRECT，可切换全局模式排查。
           </span>
         </div>
       </section>

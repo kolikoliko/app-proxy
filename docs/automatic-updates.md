@@ -5,7 +5,7 @@
 ## 用户侧流程
 
 1. 应用每天最多检查一次，也可以在设置页手动检查。
-2. 检查和下载均连接 `github.com`；应用优先使用设置中的 SOCKS5/HTTP 代理，失败后尝试直连，并提示用户确认网络或本地代理可访问 GitHub。
+2. 检查和下载均连接 `github.com`；应用优先使用设置中的 SOCKS5/HTTP 代理，代理端口不可用时自动回退直连，并提示实际使用的连接方式。
 3. 下载完成后，Tauri 使用内置公钥验证更新包签名。
 4. 用户点击“安装并重启”后，应用先停止受管 sing-box 和 TUN，再以被动模式启动 Windows 安装程序。
 5. 如果安装启动失败，应用会尝试按原配置恢复 TUN。
@@ -16,7 +16,7 @@
 
 1. 同步修改 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 中的版本号。
 2. 合并并推送通过 CI 的提交。
-3. 创建并推送完全匹配的标签，例如 `v0.2.1`。
+3. 创建并推送完全匹配的标签，例如 `v0.2.2`。
 4. `.github/workflows/release.yml` 会在 Windows x64 runner 上构建 NSIS/MSI、更新签名和 `latest.json`，然后发布 GitHub Release。
 5. 使用上一正式版本执行一次应用内升级，确认检查、下载、验签、TUN 清理和重启均正常。
 

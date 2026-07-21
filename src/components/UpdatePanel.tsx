@@ -18,12 +18,20 @@ export function UpdatePanel({ updater }: UpdatePanelProps) {
           <h2 className="settings-group__title"><Rocket size={16} />应用更新</h2>
           <p className="settings-group__description">当前版本 v{updater.currentVersion}</p>
         </div>
-        <span className="version-badge">v{updater.currentVersion}</span>
+        <button
+          type="button"
+          className="button update-check-button"
+          disabled={busy || updater.phase === "downloaded"}
+          onClick={() => void updater.checkForUpdates()}
+        >
+          {updater.phase === "checking" ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}
+          {updater.phase === "checking" ? "检查中" : "检查更新"}
+        </button>
       </div>
 
       <div className="github-notice">
         <Github size={18} aria-hidden="true" />
-        <span><strong>更新服务连接 GitHub</strong>检查或下载失败时，请先确认网络、代理端口以及 GitHub 是否可访问。</span>
+        <span><strong>更新服务连接 GitHub</strong>优先使用上方代理地址；代理端口不可用时自动回退直连。</span>
       </div>
 
       {updater.message ? (
@@ -54,27 +62,20 @@ export function UpdatePanel({ updater }: UpdatePanelProps) {
         </div>
       ) : null}
 
-      <div className="update-actions">
-        {updater.phase === "available" ? (
-          <button type="button" className="button button--primary" onClick={() => void updater.downloadUpdate()}>
-            <Download size={17} />下载更新
-          </button>
-        ) : null}
-        {updater.phase === "downloaded" ? (
-          <button type="button" className="button button--primary" onClick={() => void updater.installUpdate()}>
-            <Rocket size={17} />安装并重启
-          </button>
-        ) : null}
-        <button
-          type="button"
-          className="button"
-          disabled={busy || updater.phase === "downloaded"}
-          onClick={() => void updater.checkForUpdates()}
-        >
-          {updater.phase === "checking" ? <LoaderCircle className="spin" size={17} /> : <RefreshCw size={17} />}
-          {updater.phase === "checking" ? "正在连接 GitHub" : "检查更新"}
-        </button>
-      </div>
+      {updater.phase === "available" || updater.phase === "downloaded" ? (
+        <div className="update-actions">
+          {updater.phase === "available" ? (
+            <button type="button" className="button button--primary" onClick={() => void updater.downloadUpdate()}>
+              <Download size={17} />下载更新
+            </button>
+          ) : null}
+          {updater.phase === "downloaded" ? (
+            <button type="button" className="button button--primary" onClick={() => void updater.installUpdate()}>
+              <Rocket size={17} />安装并重启
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <p className="update-panel__footnote">应用每天最多自动检查一次；不会自动下载或强制安装。</p>
     </section>
   );

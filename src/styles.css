@@ -171,14 +171,15 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .proxy-mode-notice svg { flex: 0 0 auto; margin-top: 1px; }
 .proxy-mode-notice span { display: grid; gap: 2px; }
 .proxy-mode-notice strong { color: var(--text); font-size: 12px; }
+.proxy-mode-notice--compatible { color: var(--accent-dark); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 28%, var(--line)); }
 .pause-control { display: flex; align-items: center; gap: 9px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 7px; }
 .pause-control svg { color: var(--muted); }
 .pause-control select { flex: 1; height: 40px; color: var(--text); background: transparent; border: 0; outline: 0; }
 .pause-control option { background: var(--surface); }
 .hint { margin: 9px 0 0; color: var(--warning); font-size: 11px; }
 .settings-group--rows { padding-top: 8px; padding-bottom: 8px; }
-.update-panel__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.version-badge { padding: 4px 8px; color: var(--accent-dark); background: var(--accent-soft); border-radius: 999px; font-size: 11px; font-weight: 700; }
+.update-panel__heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.update-check-button { min-height: 32px; padding: 0 11px; font-size: 11px; white-space: nowrap; }
 .github-notice { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; color: var(--muted); background: var(--surface-soft); border: 1px solid var(--line); border-radius: 8px; font-size: 11px; line-height: 1.55; }
 .github-notice svg { flex: 0 0 auto; margin-top: 1px; color: var(--text); }
 .github-notice span { display: grid; }
