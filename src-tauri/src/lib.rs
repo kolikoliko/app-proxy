@@ -1,9 +1,11 @@
 mod icon_extractor;
 mod installed_apps;
+mod launcher;
 mod routing;
 mod store;
 
 use installed_apps::InstalledApp;
+use launcher::LauncherResult;
 use routing::{TunManager, TunStatus};
 use serde::Serialize;
 use std::{
@@ -233,6 +235,46 @@ fn remove_rule(
 ) -> Result<PersistedState, String> {
     let updated = store.update(|state| state.rules.retain(|rule| rule.id != id))?;
     reconcile_or_disable(&app, &store, &tun, updated)
+}
+
+fn launcher_rule(store: &AppStore, id: &str) -> Result<(store::AppRule, String), String> {
+    let state = store.load()?;
+    let mut rule = state
+        .rules
+        .iter()
+        .find(|rule| rule.id == id)
+        .cloned()
+        .ok_or("找不到该应用规则")?;
+    if let Some(family) = rule.package_family_name.as_deref() {
+        let resolved =
+            installed_apps::resolve_package_application(family, rule.application_id.as_deref())
+                .ok_or("无法解析 Microsoft Store 应用；请确认应用仍已安装")?;
+        rule.executable_path = resolved.executable_path;
+        rule.executable_name = resolved.executable_name;
+        rule.executable_scope_root = Some(resolved.executable_scope_root);
+        rule.scope_executable_count = resolved.executable_count;
+    }
+    Ok((rule, state.settings.proxy_url))
+}
+
+#[tauri::command]
+fn launch_rule_with_proxy(
+    id: String,
+    store: tauri::State<'_, AppStore>,
+    app: tauri::AppHandle,
+) -> Result<LauncherResult, String> {
+    let (rule, proxy_url) = launcher_rule(&store, &id)?;
+    launcher::launch_with_proxy(&app, &rule, &proxy_url)
+}
+
+#[tauri::command]
+fn create_rule_desktop_launcher(
+    id: String,
+    store: tauri::State<'_, AppStore>,
+    app: tauri::AppHandle,
+) -> Result<LauncherResult, String> {
+    let (rule, proxy_url) = launcher_rule(&store, &id)?;
+    launcher::create_desktop_launcher(&app, &rule, &proxy_url)
 }
 
 #[tauri::command]
@@ -478,6 +520,8 @@ pub fn run() {
             get_app_icon,
             update_rule,
             remove_rule,
+            launch_rule_with_proxy,
+            create_rule_desktop_launcher,
             test_proxy,
             get_tun_status,
             check_tun_ready,

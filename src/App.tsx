@@ -5,7 +5,7 @@ import { InstalledAppsDialog } from "./components/InstalledAppsDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { Sidebar, type NavigationView } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
-import { addRule, checkTunReady, chooseExecutable, getTunStatus, loadState, removeRule, saveSettings, syncAutostart, testProxy, updateRule } from "./lib/bridge";
+import { addRule, checkTunReady, chooseExecutable, createRuleDesktopLauncher, getTunStatus, launchRuleWithProxy, loadState, removeRule, saveSettings, syncAutostart, testProxy, updateRule } from "./lib/bridge";
 import { DEFAULT_STATE } from "./lib/defaults";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import type { AppSettings, InstalledApp, PersistedState, ProxyTestResult, ThemeMode, TunStatus } from "./types";
@@ -29,6 +29,8 @@ export function App() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ProxyTestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string>();
   const [activeView, setActiveView] = useState<NavigationView>("apps");
   const [pickerOpen, setPickerOpen] = useState(false);
   const updater = useAppUpdater(state.settings.proxyUrl, loaded);
@@ -162,6 +164,22 @@ export function App() {
 
   const closePicker = useCallback(() => setPickerOpen(false), []);
 
+  const handleLauncherAction = useCallback(async (id: string, action: "launch" | "shortcut") => {
+    setBusyAction(`${action}:${id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = action === "launch"
+        ? await launchRuleWithProxy(id)
+        : await createRuleDesktopLauncher(id);
+      setNotice(result.message);
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setBusyAction(undefined);
+    }
+  }, []);
+
   const handleTest = useCallback(async (proxyUrl: string) => {
     setTesting(true);
     setTestResult(null);
@@ -199,6 +217,7 @@ export function App() {
       />
       <main className="workspace">
         {error ? <div className="error-banner" role="alert">{error}</div> : null}
+        {notice ? <div className="success-banner" role="status">{notice}</div> : null}
         {updater.phase === "available" || updater.phase === "downloaded" ? (
           <button type="button" className="update-banner" onClick={() => setActiveView("settings")}>
             <span>发现应用代理 v{updater.availableVersion}，可在设置中下载并安装。</span>
@@ -219,6 +238,9 @@ export function App() {
               onAdd={() => setPickerOpen(true)}
               onToggle={(id, enabled) => void applyStateMutation(() => updateRule(id, enabled)).catch(() => undefined)}
               onRemove={(id) => void applyStateMutation(() => removeRule(id)).catch(() => undefined)}
+              onProxyLaunch={(id) => void handleLauncherAction(id, "launch")}
+              onCreateLauncher={(id) => void handleLauncherAction(id, "shortcut")}
+              busyAction={busyAction}
             />
           </>
         ) : (

@@ -1,7 +1,7 @@
 {
   "name": "app-proxy",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "A lightweight per-application proxy controller for Windows",
   "repository": "https://github.com/kolikoliko/app-proxy",
   "type": "module",

@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { DEFAULT_STATE } from "./defaults";
-import type { AppRule, AppSettings, InstalledApp, PersistedState, ProxyTestResult, TunStatus } from "../types";
+import type { AppRule, AppSettings, InstalledApp, LauncherResult, PersistedState, ProxyTestResult, TunStatus } from "../types";
 
 const STORAGE_KEY = "app-proxy-state-v1";
 
@@ -179,6 +179,31 @@ export async function removeRule(id: string): Promise<PersistedState> {
   state.rules = state.rules.filter((rule) => rule.id !== id);
   writeBrowserState(state);
   return state;
+}
+
+export async function launchRuleWithProxy(id: string): Promise<LauncherResult> {
+  if (isTauriRuntime()) return invoke<LauncherResult>("launch_rule_with_proxy", { id });
+  const rule = readBrowserState().rules.find((item) => item.id === id);
+  const displayName = rule?.displayName ?? "应用";
+  await new Promise((resolve) => window.setTimeout(resolve, 260));
+  return {
+    message: `已发送 ${displayName} 的环境代理启动请求（浏览器预览）`,
+    launcherPath: `C:\\Users\\User\\AppData\\Local\\应用代理\\launchers\\${id}\\Launch-With-Proxy.cmd`,
+    chromiumMode: true,
+  };
+}
+
+export async function createRuleDesktopLauncher(id: string): Promise<LauncherResult> {
+  if (isTauriRuntime()) return invoke<LauncherResult>("create_rule_desktop_launcher", { id });
+  const rule = readBrowserState().rules.find((item) => item.id === id);
+  const displayName = rule?.displayName ?? "应用";
+  await new Promise((resolve) => window.setTimeout(resolve, 260));
+  return {
+    message: `已创建“${displayName} - 应用代理”桌面启动器；关闭应用代理后仍可使用`,
+    launcherPath: `C:\\Users\\User\\AppData\\Local\\应用代理\\launchers\\${id}\\Launch-With-Proxy.cmd`,
+    shortcutPath: `C:\\Users\\User\\Desktop\\${displayName} - 应用代理.lnk`,
+    chromiumMode: true,
+  };
 }
 
 export async function testProxy(proxyUrl: string): Promise<ProxyTestResult> {

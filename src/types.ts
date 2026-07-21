@@ -58,3 +58,10 @@ export type ProxyTestResult = {
   latencyMs?: number;
   message: string;
 };
+
+export type LauncherResult = {
+  message: string;
+  launcherPath: string;
+  shortcutPath?: string;
+  chromiumMode: boolean;
+};
