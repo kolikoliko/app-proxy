@@ -103,6 +103,9 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .status-bar__primary[data-phase="error"] { color: var(--danger); }
 .status-bar__divider { width: 1px; height: 24px; background: var(--line); }
 .error-banner { margin-bottom: 16px; padding: 11px 14px; color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, var(--surface)); border: 1px solid color-mix(in srgb, var(--danger) 24%, var(--line)); border-radius: 8px; font-size: 13px; }
+.update-banner { width: 100%; min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; padding: 9px 14px; color: var(--accent-dark); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line)); border-radius: 8px; cursor: pointer; font-size: 12px; text-align: left; }
+.update-banner:hover { border-color: var(--accent); }
+.update-banner strong { white-space: nowrap; }
 .apps-panel { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 11px; overflow: hidden; }
 .section-header { min-height: 92px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 20px; border-bottom: 1px solid var(--line); }
 .section-header h1 { margin: 0 0 5px; font-size: 21px; line-height: 1.2; letter-spacing: -.02em; }
@@ -170,6 +173,26 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .pause-control option { background: var(--surface); }
 .hint { margin: 9px 0 0; color: var(--warning); font-size: 11px; }
 .settings-group--rows { padding-top: 8px; padding-bottom: 8px; }
+.update-panel__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.version-badge { padding: 4px 8px; color: var(--accent-dark); background: var(--accent-soft); border-radius: 999px; font-size: 11px; font-weight: 700; }
+.github-notice { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; color: var(--muted); background: var(--surface-soft); border: 1px solid var(--line); border-radius: 8px; font-size: 11px; line-height: 1.55; }
+.github-notice svg { flex: 0 0 auto; margin-top: 1px; color: var(--text); }
+.github-notice span { display: grid; }
+.github-notice strong { color: var(--text); font-size: 12px; }
+.update-message { display: flex; align-items: flex-start; gap: 8px; margin-top: 11px; padding: 10px 11px; color: var(--accent-dark); background: var(--accent-soft); border-radius: 7px; font-size: 12px; line-height: 1.45; }
+.update-message svg { flex: 0 0 auto; margin-top: 1px; }
+.update-message[data-phase="error"] { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface-soft)); }
+.update-release { margin-top: 11px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.update-release__title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.update-release__title strong { font-size: 14px; }
+.update-release__title span { color: var(--muted); font-size: 11px; }
+.update-notes { max-height: 110px; margin-top: 8px; overflow: auto; color: var(--muted); font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
+.update-progress { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.update-progress__track { flex: 1; height: 6px; overflow: hidden; background: var(--surface-soft); border-radius: 999px; }
+.update-progress__track span { display: block; height: 100%; min-width: 8%; background: var(--accent); border-radius: inherit; transition: width 180ms ease; }
+.update-progress small { min-width: 54px; color: var(--muted); font-size: 10px; text-align: right; }
+.update-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 12px; }
+.update-panel__footnote { margin: 9px 0 0; color: var(--faint); font-size: 10px; }
 .setting-row { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--line); }
 .setting-row:last-child { border-bottom: 0; }
 .setting-row > span:first-child { display: grid; gap: 4px; }

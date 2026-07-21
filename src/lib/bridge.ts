@@ -6,7 +6,7 @@ import type { AppRule, AppSettings, InstalledApp, PersistedState, ProxyTestResul
 
 const STORAGE_KEY = "app-proxy-state-v1";
 
-function isTauriRuntime() {
+export function isTauriRuntime() {
   return "__TAURI_INTERNALS__" in window;
 }
 
@@ -225,4 +225,12 @@ export async function syncAutostart(enabled: boolean): Promise<void> {
   const current = await isEnabled();
   if (enabled && !current) await enable();
   if (!enabled && current) await disable();
+}
+
+export async function prepareForUpdate(): Promise<void> {
+  if (isTauriRuntime()) await invoke("prepare_for_update");
+}
+
+export async function resumeAfterUpdateFailure(): Promise<void> {
+  if (isTauriRuntime()) await invoke("resume_after_update_failure");
 }

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "应用代理",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "io.github.app-proxy.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -29,6 +29,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -51,5 +52,16 @@
     "copyright": "Copyright App Proxy contributors",
     "category": "Utility",
     "shortDescription": "按应用控制本地代理分流"
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEExNkI2OUIyNkNGOTlBQTcKUldTbm12bHNzbWxyb2JlSUNCVGR5bVJucVBFTG4yVkRWQjNxTU5kTmtRZGFLaENpVHc3WWxSVmgK",
+      "endpoints": [
+        "https://github.com/kolikoliko/app-proxy/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

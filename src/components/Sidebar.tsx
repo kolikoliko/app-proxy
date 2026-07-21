@@ -5,6 +5,7 @@ export type NavigationView = "apps" | "settings";
 
 type SidebarProps = {
   theme: ThemeMode;
+  version: string;
   activeView: NavigationView;
   onNavigate: (view: NavigationView) => void;
   onThemeChange: (theme: ThemeMode) => void;
@@ -17,7 +18,7 @@ const navigation = [
   { id: "about", label: "关于", icon: CircleHelp, enabled: false },
 ] as const;
 
-export function Sidebar({ theme, activeView, onNavigate, onThemeChange }: SidebarProps) {
+export function Sidebar({ theme, version, activeView, onNavigate, onThemeChange }: SidebarProps) {
   const nextTheme = theme === "dark" ? "light" : "dark";
 
   return (
@@ -55,7 +56,7 @@ export function Sidebar({ theme, activeView, onNavigate, onThemeChange }: Sideba
           <Moon size={18} className="theme-toggle__moon" />
           <span className="theme-toggle__thumb" />
         </button>
-        <span className="version">v0.1.0</span>
+        <span className="version">v{version}</span>
       </div>
     </aside>
   );

@@ -7,6 +7,7 @@ import { Sidebar, type NavigationView } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { addRule, checkTunReady, chooseExecutable, getTunStatus, loadState, removeRule, saveSettings, syncAutostart, testProxy, updateRule } from "./lib/bridge";
 import { DEFAULT_STATE } from "./lib/defaults";
+import { useAppUpdater } from "./hooks/useAppUpdater";
 import type { AppSettings, InstalledApp, PersistedState, ProxyTestResult, ThemeMode, TunStatus } from "./types";
 
 const STOPPED_TUN_STATUS: TunStatus = {
@@ -30,6 +31,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<NavigationView>("apps");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const updater = useAppUpdater(state.settings.proxyUrl, loaded);
 
   const refreshFromBackend = useCallback(async () => {
     const [nextState, nextTunStatus] = await Promise.all([loadState(), getTunStatus()]);
@@ -190,12 +192,19 @@ export function App() {
     <div className="app-shell">
       <Sidebar
         theme={state.settings.theme}
+        version={updater.currentVersion}
         activeView={activeView}
         onNavigate={setActiveView}
         onThemeChange={(theme) => void saveSettingsPatch({ theme })}
       />
       <main className="workspace">
         {error ? <div className="error-banner" role="alert">{error}</div> : null}
+        {updater.phase === "available" || updater.phase === "downloaded" ? (
+          <button type="button" className="update-banner" onClick={() => setActiveView("settings")}>
+            <span>发现应用代理 v{updater.availableVersion}，可在设置中下载并安装。</span>
+            <strong>查看更新</strong>
+          </button>
+        ) : null}
         {activeView === "apps" ? (
           <>
             <StatusBar
@@ -223,6 +232,7 @@ export function App() {
               testing={testing}
               testResult={testResult}
               tunStatus={tunStatus}
+              updater={updater}
               onChange={(patch) => void saveSettingsPatch(patch)}
               onProxyCommit={(proxyUrl) => {
                 if (proxyUrl !== state.settings.proxyUrl) void saveSettingsPatch({ proxyUrl });

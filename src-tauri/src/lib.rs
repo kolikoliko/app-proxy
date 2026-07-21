@@ -251,6 +251,19 @@ fn check_tun_ready(
     tun.check(&store.load()?)
 }
 
+#[tauri::command]
+fn prepare_for_update(tun: tauri::State<'_, TunManager>) -> Result<(), String> {
+    tun.stop()
+}
+
+#[tauri::command]
+fn resume_after_update_failure(
+    store: tauri::State<'_, AppStore>,
+    tun: tauri::State<'_, TunManager>,
+) -> Result<(), String> {
+    tun.reconcile(&store.load()?).map(|_| ())
+}
+
 fn reconcile_or_disable(
     app: &tauri::AppHandle,
     store: &AppStore,
@@ -384,6 +397,8 @@ fn refresh_tray_menu(app: &tauri::AppHandle, state: &PersistedState) -> Result<(
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_autostart::Builder::new()
@@ -465,7 +480,9 @@ pub fn run() {
             remove_rule,
             test_proxy,
             get_tun_status,
-            check_tun_ready
+            check_tun_ready,
+            prepare_for_update,
+            resume_after_update_failure
         ])
         .run(tauri::generate_context!())
         .expect("failed to run app-proxy");
