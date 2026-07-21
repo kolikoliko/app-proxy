@@ -1,7 +1,7 @@
 {
   "name": "app-proxy",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A lightweight per-application proxy controller for Windows",
   "repository": "https://github.com/kolikoliko/app-proxy",
   "type": "module",
@@ -16,6 +16,8 @@
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-autostart": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

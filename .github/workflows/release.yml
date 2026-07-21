@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Verify release tag matches application version
+        shell: powershell
+        run: |
+          $version = (Get-Content -Raw src-tauri\tauri.conf.json | ConvertFrom-Json).version
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            throw "Tag ${{ github.ref_name }} does not match application version v$version"
+          }
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Fetch verified sing-box binary
+        shell: powershell
+        run: .\scripts\fetch-sing-box.ps1
+
+      - name: Build signed installers and publish release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "应用代理 v__VERSION__"
+          releaseBody: |
+            Windows x64 安装包及应用内更新文件。
+
+            更新前请确认当前网络可以访问 GitHub。安装包尚未进行 Authenticode 商业代码签名，Windows 可能显示“未知发布者”。
+          releaseDraft: false
+          prerelease: false

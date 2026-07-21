@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, Clock3, LoaderCircle, Palette, ShieldCheck } from "lucide-react";
 import type { AccentColor, AppSettings, ProxyTestResult, TunStatus } from "../types";
+import type { AppUpdater } from "../hooks/useAppUpdater";
 import { Switch } from "./Switch";
+import { UpdatePanel } from "./UpdatePanel";
 
 const ACCENT_OPTIONS: ReadonlyArray<{ value: AccentColor; label: string; color: string }> = [
   { value: "green", label: "绿色", color: "#15933d" },
@@ -17,13 +19,14 @@ type SettingsPanelProps = {
   testing: boolean;
   testResult: ProxyTestResult | null;
   tunStatus: TunStatus;
+  updater: AppUpdater;
   onChange: (patch: Partial<AppSettings>) => void;
   onProxyCommit: (proxyUrl: string) => void;
   onTest: (proxyUrl: string) => void;
   onPause: (minutes: number | null) => void;
 };
 
-export function SettingsPanel({ settings, testing, testResult, tunStatus, onChange, onProxyCommit, onTest, onPause }: SettingsPanelProps) {
+export function SettingsPanel({ settings, testing, testResult, tunStatus, updater, onChange, onProxyCommit, onTest, onPause }: SettingsPanelProps) {
   const paused = Boolean(settings.pauseUntil);
   const [proxyDraft, setProxyDraft] = useState(settings.proxyUrl);
 
@@ -129,6 +132,8 @@ export function SettingsPanel({ settings, testing, testResult, tunStatus, onChan
           />
         </SettingRow>
       </section>
+
+      <UpdatePanel updater={updater} />
     </aside>
   );
 }
