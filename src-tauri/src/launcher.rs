@@ -1,4 +1,4 @@
-use crate::store::AppRule;
+use crate::{icon_extractor, installed_apps, store::AppRule};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -82,6 +82,7 @@ pub fn create_desktop_launcher(
     ));
     let helper = files.directory.join("Create-Shortcut.ps1");
     write_utf8_bom(&helper, SHORTCUT_SCRIPT)?;
+    let icon_path = shortcut_icon_path(rule, &files);
 
     let output = powershell_command()
         .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
@@ -99,7 +100,7 @@ pub fn create_desktop_launcher(
             rule.display_name
         ))
         .arg("-IconPath")
-        .arg(&files.icon_path)
+        .arg(&icon_path)
         .output()
         .map_err(|error| format!("无法创建桌面快捷方式：{error}"))?;
     if !output.status.success() {
@@ -120,6 +121,25 @@ pub fn create_desktop_launcher(
         shortcut_path: Some(shortcut.to_string_lossy().into_owned()),
         chromium_mode: files.chromium_mode,
     })
+}
+
+fn shortcut_icon_path(rule: &AppRule, files: &LauncherFiles) -> PathBuf {
+    let generated = files.directory.join("Application.ico");
+    if rule.package_family_name.is_some() {
+        let source = rule.executable_scope_root.as_deref().and_then(|root| {
+            installed_apps::resolve_package_icon_path(root, rule.application_id.as_deref())
+        });
+        if source
+            .as_deref()
+            .is_some_and(|source| icon_extractor::write_png_as_ico(source, &generated).is_ok())
+        {
+            return generated;
+        }
+        if generated.is_file() {
+            return generated;
+        }
+    }
+    files.icon_path.clone()
 }
 
 fn write_launcher_files(
@@ -458,8 +478,8 @@ try {
 mod tests {
     use super::{
         is_chromium_like, normalized_launcher_executable, powershell_command,
-        sanitize_shortcut_name, validate_launcher_proxy, write_utf8_bom, RUNTIME_SCRIPT,
-        SHORTCUT_SCRIPT,
+        sanitize_shortcut_name, shortcut_icon_path, validate_launcher_proxy, write_utf8_bom,
+        LauncherFiles, RUNTIME_SCRIPT, SHORTCUT_SCRIPT,
     };
     use crate::store::AppRule;
 
@@ -525,6 +545,41 @@ mod tests {
             stable.to_string_lossy()
         );
 
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn store_shortcut_uses_generated_manifest_icon() {
+        let Some(scope) = crate::installed_apps::resolve_package_application(
+            "OpenAI.Codex_2p2nqsd0c76g0",
+            Some("App"),
+        ) else {
+            return;
+        };
+        let directory = std::env::temp_dir().join(format!(
+            "app-proxy-store-shortcut-icon-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut chatgpt = rule("ChatGPT.exe", Some("OpenAI.Codex_2p2nqsd0c76g0"));
+        chatgpt.application_id = Some("App".into());
+        chatgpt.executable_path = scope.executable_path.clone();
+        chatgpt.executable_scope_root = Some(scope.executable_scope_root);
+        let files = LauncherFiles {
+            directory: directory.clone(),
+            script: directory.join("Launch-With-Proxy.ps1"),
+            command: directory.join("Launch-With-Proxy.cmd"),
+            config: directory.join("launcher.json"),
+            icon_path: std::path::PathBuf::from(&chatgpt.executable_path),
+            chromium_mode: true,
+        };
+
+        let icon = shortcut_icon_path(&chatgpt, &files);
+        assert_eq!(icon, directory.join("Application.ico"));
+        let decoded = ico::IconDir::read(std::fs::File::open(icon).unwrap()).unwrap();
+        assert_eq!(decoded.entries()[0].width(), 256);
+        assert_eq!(decoded.entries()[0].height(), 256);
         std::fs::remove_dir_all(directory).unwrap();
     }
 

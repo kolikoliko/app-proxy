@@ -198,3 +198,49 @@ pub fn extract_icon_data_url(path: &str) -> Result<Option<String>, String> {
 pub fn extract_icon_data_url(_path: &str) -> Result<Option<String>, String> {
     Ok(None)
 }
+
+pub fn write_png_as_ico(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> Result<(), String> {
+    let source_file =
+        std::fs::File::open(source).map_err(|error| format!("无法读取应用图标：{error}"))?;
+    let image = ico::IconImage::read_png(source_file)
+        .map_err(|error| format!("无法解析应用清单图标：{error}"))?;
+    if image.width() == 0 || image.height() == 0 || image.width() > 256 || image.height() > 256 {
+        return Err("快捷方式图标尺寸必须在 1 到 256 像素之间".into());
+    }
+    let entry = ico::IconDirEntry::encode_as_png(&image)
+        .map_err(|error| format!("无法编码快捷方式图标：{error}"))?;
+    let mut icon = ico::IconDir::new(ico::ResourceType::Icon);
+    icon.add_entry(entry);
+    let destination_file = std::fs::File::create(destination)
+        .map_err(|error| format!("无法保存快捷方式图标：{error}"))?;
+    icon.write(destination_file)
+        .map_err(|error| format!("无法保存快捷方式图标：{error}"))
+}
+
+#[cfg(test)]
+mod icon_file_tests {
+    use super::write_png_as_ico;
+
+    #[test]
+    fn generated_icon_decodes_with_standard_icon_reader() {
+        let directory =
+            std::env::temp_dir().join(format!("app-proxy-ico-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("icons/128x128.png");
+        let destination = directory.join("Application.ico");
+
+        write_png_as_ico(&source, &destination).unwrap();
+        let icon = ico::IconDir::read(std::fs::File::open(&destination).unwrap()).unwrap();
+        assert_eq!(icon.entries().len(), 1);
+        assert_eq!(icon.entries()[0].width(), 128);
+        assert_eq!(icon.entries()[0].height(), 128);
+        assert_eq!(
+            icon.entries()[0].decode().unwrap().rgba_data().len(),
+            128 * 128 * 4
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+}

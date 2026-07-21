@@ -311,6 +311,8 @@ mod windows {
         id: String,
         executable: String,
         display_name: Option<String>,
+        square44_logo: Option<String>,
+        square150_logo: Option<String>,
     }
 
     fn manifest_applications(package_root: &Path) -> Vec<ManifestApplication> {
@@ -352,6 +354,8 @@ mod windows {
                             id,
                             executable,
                             display_name: None,
+                            square44_logo: None,
+                            square150_logo: None,
                         });
                     }
                 }
@@ -360,14 +364,22 @@ mod windows {
                 {
                     if let Some(application) = current.as_mut() {
                         for attribute in element.attributes().flatten() {
-                            if attribute.key.local_name().as_ref() != b"DisplayName" {
-                                continue;
-                            }
                             if let Ok(value) = attribute.decoded_and_normalized_value(
                                 XmlVersion::Implicit1_0,
                                 reader.decoder(),
                             ) {
-                                application.display_name = Some(value.into_owned());
+                                match attribute.key.local_name().as_ref() {
+                                    b"DisplayName" => {
+                                        application.display_name = Some(value.into_owned())
+                                    }
+                                    b"Square44x44Logo" => {
+                                        application.square44_logo = Some(value.into_owned())
+                                    }
+                                    b"Square150x150Logo" => {
+                                        application.square150_logo = Some(value.into_owned())
+                                    }
+                                    _ => {}
+                                }
                             }
                         }
                     }
@@ -389,6 +401,105 @@ mod windows {
             buffer.clear();
         }
         applications
+    }
+
+    pub fn resolve_package_icon_path(
+        package_root: &str,
+        application_id: Option<&str>,
+    ) -> Option<PathBuf> {
+        let package_root = Path::new(package_root);
+        let applications = manifest_applications(package_root);
+        let application = application_id
+            .and_then(|expected| {
+                applications
+                    .iter()
+                    .find(|application| application.id.eq_ignore_ascii_case(expected))
+            })
+            .or_else(|| applications.first())?;
+
+        application
+            .square44_logo
+            .as_deref()
+            .and_then(|logo| best_logo_asset(package_root, logo))
+            .or_else(|| {
+                application
+                    .square150_logo
+                    .as_deref()
+                    .and_then(|logo| best_logo_asset(package_root, logo))
+            })
+    }
+
+    fn best_logo_asset(package_root: &Path, manifest_value: &str) -> Option<PathBuf> {
+        let base = package_root.join(manifest_value.replace('/', "\\"));
+        let directory = base.parent()?.to_path_buf();
+        let stem = base.file_stem()?.to_str()?.to_ascii_lowercase();
+        let mut candidates = Vec::new();
+        if base.is_file() {
+            candidates.push((logo_asset_score(&base), base));
+        }
+        for entry in fs::read_dir(directory).ok()?.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            let lower = name.to_ascii_lowercase();
+            if !lower.ends_with(".png")
+                || !(lower == format!("{stem}.png") || lower.starts_with(&format!("{stem}.")))
+            {
+                continue;
+            }
+            candidates.push((logo_asset_score(&path), path));
+        }
+        candidates
+            .into_iter()
+            .max_by_key(|(score, _)| *score)
+            .map(|(_, path)| path)
+    }
+
+    fn logo_asset_score(path: &Path) -> u32 {
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let target_size = name
+            .split("targetsize-")
+            .nth(1)
+            .and_then(|value| {
+                value
+                    .split(|character: char| !character.is_ascii_digit())
+                    .next()
+            })
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0);
+        let scale = name
+            .split("scale-")
+            .nth(1)
+            .and_then(|value| {
+                value
+                    .split(|character: char| !character.is_ascii_digit())
+                    .next()
+            })
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0);
+        if target_size > 256 {
+            return 0;
+        }
+        let variant = if name.contains("altform-unplated") {
+            30_000
+        } else if name.contains("altform-lightunplated") {
+            20_000
+        } else if target_size > 0 {
+            10_000
+        } else if scale == 0 {
+            1_000
+        } else {
+            0
+        };
+        variant + target_size.max(scale / 2)
     }
 
     fn executable_from_value(raw: &str) -> Option<PathBuf> {
@@ -423,8 +534,8 @@ mod windows {
     #[cfg(test)]
     mod tests {
         use super::{
-            discover, executable_from_value, parse_manifest_applications,
-            resolve_package_application,
+            best_logo_asset, discover, executable_from_value, parse_manifest_applications,
+            resolve_package_application, resolve_package_icon_path,
         };
         use std::{collections::HashSet, env};
 
@@ -498,13 +609,59 @@ mod windows {
         }
 
         #[test]
+        fn resolves_chatgpt_high_resolution_unplated_icon_when_installed() {
+            let Some(scope) =
+                resolve_package_application("OpenAI.Codex_2p2nqsd0c76g0", Some("App"))
+            else {
+                return;
+            };
+            let icon = resolve_package_icon_path(&scope.executable_scope_root, Some("App"))
+                .expect("ChatGPT manifest icon");
+            let name = icon
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            assert!(name.contains("targetsize-256_altform-unplated"));
+        }
+
+        #[test]
         fn parses_full_trust_msix_application() {
-            let manifest = br#"<Package xmlns:uap="urn:test"><Applications><Application Id="App" Executable="app/ChatGPT.exe"><uap:VisualElements DisplayName="ChatGPT" /></Application></Applications></Package>"#;
+            let manifest = br#"<Package xmlns:uap="urn:test"><Applications><Application Id="App" Executable="app/ChatGPT.exe"><uap:VisualElements DisplayName="ChatGPT" Square44x44Logo="assets/Square44x44Logo.png" Square150x150Logo="assets/Square150x150Logo.png" /></Application></Applications></Package>"#;
             let applications = parse_manifest_applications(manifest);
             assert_eq!(applications.len(), 1);
             assert_eq!(applications[0].id, "App");
             assert_eq!(applications[0].executable, "app/ChatGPT.exe");
             assert_eq!(applications[0].display_name.as_deref(), Some("ChatGPT"));
+            assert_eq!(
+                applications[0].square44_logo.as_deref(),
+                Some("assets/Square44x44Logo.png")
+            );
+        }
+
+        #[test]
+        fn prefers_high_resolution_unplated_store_logo() {
+            let directory = std::env::temp_dir().join(format!(
+                "app-proxy-logo-selection-test-{}",
+                uuid::Uuid::new_v4()
+            ));
+            let assets = directory.join("assets");
+            std::fs::create_dir_all(&assets).unwrap();
+            for name in [
+                "Square44x44Logo.png",
+                "Square44x44Logo.scale-200.png",
+                "Square44x44Logo.targetsize-48_altform-unplated.png",
+                "Square44x44Logo.targetsize-256_altform-unplated.png",
+                "Square44x44Logo.targetsize-256_altform-lightunplated.png",
+            ] {
+                std::fs::write(assets.join(name), []).unwrap();
+            }
+            let selected = best_logo_asset(&directory, r"assets\Square44x44Logo.png").unwrap();
+            assert_eq!(
+                selected.file_name().and_then(|value| value.to_str()),
+                Some("Square44x44Logo.targetsize-256_altform-unplated.png")
+            );
+            std::fs::remove_dir_all(directory).unwrap();
         }
     }
 }
@@ -522,6 +679,14 @@ pub fn resolve_package_application(
     windows::resolve_package_application(package_family_name, application_id)
 }
 
+#[cfg(target_os = "windows")]
+pub fn resolve_package_icon_path(
+    package_root: &str,
+    application_id: Option<&str>,
+) -> Option<std::path::PathBuf> {
+    windows::resolve_package_icon_path(package_root, application_id)
+}
+
 #[cfg(not(target_os = "windows"))]
 pub fn discover_installed_apps() -> Vec<InstalledApp> {
     Vec::new()
@@ -532,5 +697,13 @@ pub fn resolve_package_application(
     _package_family_name: &str,
     _application_id: Option<&str>,
 ) -> Option<PackageApplicationScope> {
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn resolve_package_icon_path(
+    _package_root: &str,
+    _application_id: Option<&str>,
+) -> Option<std::path::PathBuf> {
     None
 }

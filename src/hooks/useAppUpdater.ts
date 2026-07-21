@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { isTauriRuntime, prepareForUpdate, resumeAfterUpdateFailure, testProxy } from "../lib/bridge";
 
-const FALLBACK_VERSION = "0.2.2";
+const FALLBACK_VERSION = "0.3.1";
 const AUTO_CHECK_KEY = "app-proxy-update-check-v1";
 const AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 
@@ -33,6 +33,10 @@ export type AppUpdater = AppUpdateState & {
 };
 
 type UpdateConnection = "proxy" | "direct";
+
+export function normalizeUpdaterProxyUrl(proxyUrl: string) {
+  return proxyUrl.replace(/^socks:\/\//i, "socks5://");
+}
 
 function errorMessage(reason: unknown, connection: UpdateConnection = "proxy") {
   const detail = reason instanceof Error ? reason.message : String(reason);
@@ -85,7 +89,7 @@ export function useAppUpdater(proxyUrl: string, ready: boolean): AppUpdater {
           : "代理端口不可用，正在回退为直连 GitHub…",
       }));
       const update: Update | null = await check(connection === "proxy"
-        ? { proxy: proxyUrl, timeout: 15_000 }
+        ? { proxy: normalizeUpdaterProxyUrl(proxyUrl), timeout: 15_000 }
         : { timeout: 15_000 });
       const connectionNote = connection === "proxy" ? "已通过代理检查" : "代理不可用，已回退直连";
 
