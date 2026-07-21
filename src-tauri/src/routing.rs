@@ -179,7 +179,8 @@ impl TunManager {
         let stderr = stdout
             .try_clone()
             .map_err(|error| format!("无法打开内核日志：{error}"))?;
-        let mut child = Command::new(&binary)
+        let mut command = background_command(&binary);
+        let mut child = command
             .args(["run", "-c"])
             .arg(&config_path)
             .stdin(Stdio::null())
@@ -328,6 +329,16 @@ pub fn build_config(state: &PersistedState) -> Result<Value, String> {
         .filter(|rule| rule.enabled && rule.executable_scope_root.is_none())
         .map(|rule| rule.executable_path.as_str())
         .collect();
+    // Windows may report a process through a normalized/device path that is not
+    // byte-for-byte identical to the installation path. Keep the full-path rule
+    // as the precise match and add an executable-name fallback for classic
+    // desktop apps. Packaged apps remain constrained to their package root.
+    let process_names: Vec<&str> = state
+        .rules
+        .iter()
+        .filter(|rule| rule.enabled && rule.executable_scope_root.is_none())
+        .map(|rule| rule.executable_name.as_str())
+        .collect();
     let process_path_regex: Vec<String> = state
         .rules
         .iter()
@@ -335,7 +346,7 @@ pub fn build_config(state: &PersistedState) -> Result<Value, String> {
         .filter_map(|rule| rule.executable_scope_root.as_deref())
         .filter_map(executable_scope_regex)
         .collect();
-    if process_paths.is_empty() && process_path_regex.is_empty() {
+    if process_paths.is_empty() && process_names.is_empty() && process_path_regex.is_empty() {
         return Err("请先至少开启一个应用规则".into());
     }
 
@@ -346,6 +357,17 @@ pub fn build_config(state: &PersistedState) -> Result<Value, String> {
     if !process_paths.is_empty() {
         let mut app_rule = json!({
             "process_path": process_paths,
+            "action":"route",
+            "outbound":"proxy"
+        });
+        if is_http {
+            app_rule["network"] = json!("tcp");
+        }
+        route_rules.push(app_rule);
+    }
+    if !process_names.is_empty() {
+        let mut app_rule = json!({
+            "process_name": process_names,
             "action":"route",
             "outbound":"proxy"
         });
@@ -435,7 +457,7 @@ fn check_config(binary: &Path, config: &Path) -> Result<(), String> {
             binary.display()
         ));
     }
-    let output = Command::new(binary)
+    let output = background_command(binary)
         .args(["check", "-c"])
         .arg(config)
         .output()
@@ -445,6 +467,19 @@ fn check_config(binary: &Path, config: &Path) -> Result<(), String> {
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
     Err(format!("TUN 配置校验失败：{}", stderr.trim()))
+}
+
+fn background_command(binary: &Path) -> Command {
+    let mut command = Command::new(binary);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        // sing-box is a console executable. CREATE_NO_WINDOW keeps both the
+        // short config check and the long-running TUN process in the background.
+        command.creation_flags(windows::Win32::System::Threading::CREATE_NO_WINDOW.0);
+    }
+    command
 }
 
 fn ensure_proxy_reachable(proxy_url: &str) -> Result<(), String> {
@@ -513,6 +548,10 @@ mod tests {
             config["route"]["rules"][2]["process_path"][0],
             r"C:\Program Files\Browser\browser.exe"
         );
+        assert_eq!(
+            config["route"]["rules"][3]["process_name"][0],
+            "browser.exe"
+        );
         assert!(
             config["inbounds"][0]["route_exclude_address"]
                 .as_array()
@@ -527,6 +566,7 @@ mod tests {
         let config = build_config(&state("http://127.0.0.1:7890")).unwrap();
         assert_eq!(config["outbounds"][0]["type"], "http");
         assert_eq!(config["route"]["rules"][2]["network"], "tcp");
+        assert_eq!(config["route"]["rules"][3]["network"], "tcp");
     }
 
     #[test]
