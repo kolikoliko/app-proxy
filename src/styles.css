@@ -167,6 +167,10 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .test-result { display: flex; align-items: center; gap: 7px; margin-top: 10px; min-height: 38px; padding: 0 11px; color: var(--danger); background: color-mix(in srgb, var(--danger) 7%, var(--surface-soft)); border-radius: 7px; font-size: 12px; }
 .test-result[data-success="true"] { color: var(--accent-dark); background: var(--accent-soft); }
 .test-result strong { margin-left: auto; }
+.proxy-mode-notice { display: flex; align-items: flex-start; gap: 9px; margin-top: 11px; padding: 10px 11px; color: var(--warning); background: color-mix(in srgb, var(--warning) 8%, var(--surface-soft)); border: 1px solid color-mix(in srgb, var(--warning) 24%, var(--line)); border-radius: 7px; font-size: 11px; line-height: 1.55; }
+.proxy-mode-notice svg { flex: 0 0 auto; margin-top: 1px; }
+.proxy-mode-notice span { display: grid; gap: 2px; }
+.proxy-mode-notice strong { color: var(--text); font-size: 12px; }
 .pause-control { display: flex; align-items: center; gap: 9px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 7px; }
 .pause-control svg { color: var(--muted); }
 .pause-control select { flex: 1; height: 40px; color: var(--text); background: transparent; border: 0; outline: 0; }

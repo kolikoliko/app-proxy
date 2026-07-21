@@ -1,6 +1,6 @@
 [package]
 name = "app-proxy"
-version = "0.2.0"
+version = "0.2.1"
 description = "A lightweight per-application proxy controller for Windows"
 authors = ["App Proxy contributors"]
 edition = "2021"
