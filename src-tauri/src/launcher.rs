@@ -80,9 +80,54 @@ pub fn create_desktop_launcher(
         "{} - 应用代理.lnk",
         sanitize_shortcut_name(&rule.display_name)
     ));
+    create_launcher_shortcut(
+        rule,
+        proxy_url,
+        &files,
+        shortcut,
+        "桌面",
+        format!(
+            "已创建“{} - 应用代理”桌面启动器；关闭应用代理后仍可使用",
+            rule.display_name
+        ),
+    )
+}
+
+pub fn create_start_menu_launcher(
+    app: &AppHandle,
+    rule: &AppRule,
+    proxy_url: &str,
+) -> Result<LauncherResult, String> {
+    let files = write_launcher_files(app, rule, proxy_url)?;
+    let programs = start_menu_programs_directory(app)?;
+    let shortcut = start_menu_shortcut_path(&programs, &rule.display_name);
+    if let Some(parent) = shortcut.parent() {
+        fs::create_dir_all(parent).map_err(|error| format!("无法创建开始菜单目录：{error}"))?;
+    }
+    create_launcher_shortcut(
+        rule,
+        proxy_url,
+        &files,
+        shortcut,
+        "开始菜单",
+        format!(
+            "已添加“{} - 应用代理”至开始菜单的“所有应用”；可在开始菜单中右键选择“固定到开始屏幕”",
+            rule.display_name
+        ),
+    )
+}
+
+fn create_launcher_shortcut(
+    rule: &AppRule,
+    proxy_url: &str,
+    files: &LauncherFiles,
+    shortcut: PathBuf,
+    location: &str,
+    message: String,
+) -> Result<LauncherResult, String> {
     let helper = files.directory.join("Create-Shortcut.ps1");
     write_utf8_bom(&helper, SHORTCUT_SCRIPT)?;
-    let icon_path = shortcut_icon_path(rule, &files);
+    let icon_path = shortcut_icon_path(rule, files);
 
     let output = powershell_command()
         .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
@@ -102,25 +147,48 @@ pub fn create_desktop_launcher(
         .arg("-IconPath")
         .arg(&icon_path)
         .output()
-        .map_err(|error| format!("无法创建桌面快捷方式：{error}"))?;
+        .map_err(|error| format!("无法创建{location}快捷方式：{error}"))?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if detail.is_empty() {
-            "创建桌面快捷方式失败".into()
+            format!("创建{location}快捷方式失败")
         } else {
-            format!("创建桌面快捷方式失败：{detail}")
+            format!("创建{location}快捷方式失败：{detail}")
         });
     }
 
     Ok(LauncherResult {
-        message: format!(
-            "已创建“{} - 应用代理”桌面启动器；关闭应用代理后仍可使用",
-            rule.display_name
-        ),
+        message,
         launcher_path: files.command.to_string_lossy().into_owned(),
         shortcut_path: Some(shortcut.to_string_lossy().into_owned()),
         chromium_mode: files.chromium_mode,
     })
+}
+
+#[cfg(windows)]
+fn start_menu_programs_directory(_app: &AppHandle) -> Result<PathBuf, String> {
+    std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .map(|directory| {
+            directory
+                .join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs")
+        })
+        .ok_or_else(|| "无法确定当前用户的开始菜单目录".into())
+}
+
+#[cfg(not(windows))]
+fn start_menu_programs_directory(_app: &AppHandle) -> Result<PathBuf, String> {
+    Err("开始菜单启动器当前仅支持 Windows".into())
+}
+
+fn start_menu_shortcut_path(programs: &Path, display_name: &str) -> PathBuf {
+    programs.join("应用代理").join(format!(
+        "{} - 应用代理.lnk",
+        sanitize_shortcut_name(display_name)
+    ))
 }
 
 fn shortcut_icon_path(rule: &AppRule, files: &LauncherFiles) -> PathBuf {
@@ -478,10 +546,11 @@ try {
 mod tests {
     use super::{
         is_chromium_like, normalized_launcher_executable, powershell_command,
-        sanitize_shortcut_name, shortcut_icon_path, validate_launcher_proxy, write_utf8_bom,
-        LauncherFiles, RUNTIME_SCRIPT, SHORTCUT_SCRIPT,
+        sanitize_shortcut_name, shortcut_icon_path, start_menu_shortcut_path,
+        validate_launcher_proxy, write_utf8_bom, LauncherFiles, RUNTIME_SCRIPT, SHORTCUT_SCRIPT,
     };
     use crate::store::AppRule;
+    use std::path::PathBuf;
 
     fn rule(executable_name: &str, package_family_name: Option<&str>) -> AppRule {
         AppRule {
@@ -522,6 +591,16 @@ mod tests {
     fn sanitizes_windows_shortcut_names() {
         assert_eq!(sanitize_shortcut_name("Chat:GPT?"), "Chat_GPT_");
         assert_eq!(sanitize_shortcut_name("..."), "应用");
+    }
+
+    #[test]
+    fn places_start_menu_launcher_in_app_proxy_folder() {
+        let programs =
+            PathBuf::from(r"C:\Users\User\AppData\Roaming\Microsoft\Windows\Start Menu\Programs");
+        assert_eq!(
+            start_menu_shortcut_path(&programs, "ChatGPT"),
+            programs.join("应用代理").join("ChatGPT - 应用代理.lnk")
+        );
     }
 
     #[test]

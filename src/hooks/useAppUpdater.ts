@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { isTauriRuntime, prepareForUpdate, resumeAfterUpdateFailure, testProxy } from "../lib/bridge";
 
-const FALLBACK_VERSION = "0.3.1";
+const FALLBACK_VERSION = "0.3.2";
 const AUTO_CHECK_KEY = "app-proxy-update-check-v1";
 const AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 

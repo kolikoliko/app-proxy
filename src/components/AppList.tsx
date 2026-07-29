@@ -1,4 +1,4 @@
-import { AppWindow, LoaderCircle, MonitorDown, Play, Plus, Trash2 } from "lucide-react";
+import { AppWindow, LoaderCircle, Menu, MonitorDown, Play, Plus, Trash2 } from "lucide-react";
 import type { AppRule } from "../types";
 import { ApplicationIcon } from "./ApplicationIcon";
 import { Switch } from "./Switch";
@@ -10,10 +10,20 @@ type AppListProps = {
   onRemove: (id: string) => void;
   onProxyLaunch: (id: string) => void;
   onCreateLauncher: (id: string) => void;
+  onCreateStartMenuLauncher: (id: string) => void;
   busyAction?: string;
 };
 
-export function AppList({ rules, onAdd, onToggle, onRemove, onProxyLaunch, onCreateLauncher, busyAction }: AppListProps) {
+export function AppList({
+  rules,
+  onAdd,
+  onToggle,
+  onRemove,
+  onProxyLaunch,
+  onCreateLauncher,
+  onCreateStartMenuLauncher,
+  busyAction,
+}: AppListProps) {
   return (
     <section className="apps-panel">
       <header className="section-header">
@@ -79,6 +89,16 @@ export function AppList({ rules, onAdd, onToggle, onRemove, onProxyLaunch, onCre
                 title="创建独立桌面启动器"
               >
                 {busyAction === `shortcut:${rule.id}` ? <LoaderCircle className="spin" size={16} /> : <MonitorDown size={16} />}
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                disabled={Boolean(busyAction)}
+                onClick={() => onCreateStartMenuLauncher(rule.id)}
+                aria-label={`为 ${rule.displayName} 添加开始菜单代理启动器`}
+                title="添加到开始菜单（可再手动固定）"
+              >
+                {busyAction === `start-menu:${rule.id}` ? <LoaderCircle className="spin" size={16} /> : <Menu size={16} />}
               </button>
               <button
                 type="button"
