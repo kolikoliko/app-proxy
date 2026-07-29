@@ -5,7 +5,7 @@ import { InstalledAppsDialog } from "./components/InstalledAppsDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { Sidebar, type NavigationView } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
-import { addRule, checkTunReady, chooseExecutable, createRuleDesktopLauncher, getTunStatus, launchRuleWithProxy, loadState, removeRule, saveSettings, syncAutostart, testProxy, updateRule } from "./lib/bridge";
+import { addRule, checkTunReady, chooseExecutable, createRuleDesktopLauncher, createRuleStartMenuLauncher, getTunStatus, launchRuleWithProxy, loadState, removeRule, saveSettings, syncAutostart, testProxy, updateRule } from "./lib/bridge";
 import { DEFAULT_STATE } from "./lib/defaults";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import type { AppSettings, InstalledApp, PersistedState, ProxyTestResult, ThemeMode, TunStatus } from "./types";
@@ -164,14 +164,16 @@ export function App() {
 
   const closePicker = useCallback(() => setPickerOpen(false), []);
 
-  const handleLauncherAction = useCallback(async (id: string, action: "launch" | "shortcut") => {
+  const handleLauncherAction = useCallback(async (id: string, action: "launch" | "shortcut" | "start-menu") => {
     setBusyAction(`${action}:${id}`);
     setError(null);
     setNotice(null);
     try {
       const result = action === "launch"
         ? await launchRuleWithProxy(id)
-        : await createRuleDesktopLauncher(id);
+        : action === "shortcut"
+          ? await createRuleDesktopLauncher(id)
+          : await createRuleStartMenuLauncher(id);
       setNotice(result.message);
     } catch (reason) {
       setError(String(reason));
@@ -240,6 +242,7 @@ export function App() {
               onRemove={(id) => void applyStateMutation(() => removeRule(id)).catch(() => undefined)}
               onProxyLaunch={(id) => void handleLauncherAction(id, "launch")}
               onCreateLauncher={(id) => void handleLauncherAction(id, "shortcut")}
+              onCreateStartMenuLauncher={(id) => void handleLauncherAction(id, "start-menu")}
               busyAction={busyAction}
             />
           </>

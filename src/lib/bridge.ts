@@ -206,6 +206,19 @@ export async function createRuleDesktopLauncher(id: string): Promise<LauncherRes
   };
 }
 
+export async function createRuleStartMenuLauncher(id: string): Promise<LauncherResult> {
+  if (isTauriRuntime()) return invoke<LauncherResult>("create_rule_start_menu_launcher", { id });
+  const rule = readBrowserState().rules.find((item) => item.id === id);
+  const displayName = rule?.displayName ?? "应用";
+  await new Promise((resolve) => window.setTimeout(resolve, 260));
+  return {
+    message: `已添加“${displayName} - 应用代理”至开始菜单的“所有应用”；可在开始菜单中右键选择“固定到开始屏幕”（浏览器预览）`,
+    launcherPath: `C:\\Users\\User\\AppData\\Local\\应用代理\\launchers\\${id}\\Launch-With-Proxy.cmd`,
+    shortcutPath: `C:\\Users\\User\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\应用代理\\${displayName} - 应用代理.lnk`,
+    chromiumMode: true,
+  };
+}
+
 export async function testProxy(proxyUrl: string): Promise<ProxyTestResult> {
   if (isTauriRuntime()) return invoke<ProxyTestResult>("test_proxy", { proxyUrl });
   await new Promise((resolve) => window.setTimeout(resolve, 420));

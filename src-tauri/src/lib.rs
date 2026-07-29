@@ -278,6 +278,16 @@ fn create_rule_desktop_launcher(
 }
 
 #[tauri::command]
+fn create_rule_start_menu_launcher(
+    id: String,
+    store: tauri::State<'_, AppStore>,
+    app: tauri::AppHandle,
+) -> Result<LauncherResult, String> {
+    let (rule, proxy_url) = launcher_rule(&store, &id)?;
+    launcher::create_start_menu_launcher(&app, &rule, &proxy_url)
+}
+
+#[tauri::command]
 fn get_tun_status(
     store: tauri::State<'_, AppStore>,
     tun: tauri::State<'_, TunManager>,
@@ -522,6 +532,7 @@ pub fn run() {
             remove_rule,
             launch_rule_with_proxy,
             create_rule_desktop_launcher,
+            create_rule_start_menu_launcher,
             test_proxy,
             get_tun_status,
             check_tun_ready,
