@@ -43,8 +43,8 @@ export function SettingsPanel({ settings, testing, testResult, tunStatus, update
               key={option.value}
               type="button"
               className="accent-option"
-              data-selected={(settings.accentColor ?? "green") === option.value}
-              aria-pressed={(settings.accentColor ?? "green") === option.value}
+              data-selected={(settings.accentColor ?? "blue") === option.value}
+              aria-pressed={(settings.accentColor ?? "blue") === option.value}
               aria-label={`${option.label}主题色`}
               onClick={() => onChange({ accentColor: option.value })}
             >

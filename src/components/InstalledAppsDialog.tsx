@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { FolderOpen, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react";
 import { listInstalledApps } from "../lib/bridge";
 import type { AppRule, InstalledApp } from "../types";
@@ -17,31 +17,53 @@ export function InstalledAppsDialog({ existingRules, onAdd, onBrowse, onClose }:
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [addingPath, setAddingPath] = useState<string | null>(null);
+  const mounted = useRef(true);
+  const requestId = useRef(0);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const previousFocus = useRef<HTMLElement | null>(null);
   const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase());
 
-  const loadApps = async () => {
+  const loadApps = useCallback(async () => {
+    const currentRequest = ++requestId.current;
     setLoading(true);
     setError(null);
     try {
-      setApps(await listInstalledApps());
+      const nextApps = await listInstalledApps();
+      if (mounted.current && currentRequest === requestId.current) setApps(nextApps);
     } catch (reason) {
-      setError(String(reason));
+      if (mounted.current && currentRequest === requestId.current) setError(String(reason));
     } finally {
-      setLoading(false);
+      if (mounted.current && currentRequest === requestId.current) setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    void loadApps();
   }, []);
 
   useEffect(() => {
+    mounted.current = true;
+    previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    searchRef.current?.focus();
+    void loadApps();
+    return () => {
+      mounted.current = false;
+      previousFocus.current?.focus();
+    };
+  }, [loadApps]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && !addingPath) onClose();
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(document.querySelectorAll<HTMLElement>(
+        ".app-picker button:not(:disabled), .app-picker input:not(:disabled), .app-picker select:not(:disabled)",
+      ));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  }, [addingPath, onClose]);
 
   const existingPaths = useMemo(
     () => new Set(existingRules.map((rule) => rule.executablePath.toLocaleLowerCase())),
@@ -64,7 +86,7 @@ export function InstalledAppsDialog({ existingRules, onAdd, onBrowse, onClose }:
 
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
+      if (event.target === event.currentTarget && !addingPath) onClose();
     }}>
       <section className="app-picker" role="dialog" aria-modal="true" aria-labelledby="app-picker-title">
         <header className="app-picker__header">
@@ -72,7 +94,7 @@ export function InstalledAppsDialog({ existingRules, onAdd, onBrowse, onClose }:
             <h2 id="app-picker-title">添加应用</h2>
             <p>从 Windows 已安装的桌面软件中选择。</p>
           </div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="关闭添加应用窗口">
+          <button type="button" className="icon-button" onClick={onClose} disabled={Boolean(addingPath)} aria-label="关闭添加应用窗口">
             <X size={19} />
           </button>
         </header>
@@ -80,7 +102,7 @@ export function InstalledAppsDialog({ existingRules, onAdd, onBrowse, onClose }:
         <div className="app-picker__toolbar">
           <label className="search-field">
             <Search size={17} />
-            <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索应用名称或路径" />
+            <input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索应用名称或路径" />
           </label>
           <button type="button" className="button" onClick={() => void loadApps()} disabled={loading}>
             <RefreshCw size={16} className={loading ? "spin" : undefined} />刷新
@@ -122,8 +144,9 @@ export function InstalledAppsDialog({ existingRules, onAdd, onBrowse, onClose }:
                 <button
                   type="button"
                   className="button installed-app-row__action"
-                  disabled={added || adding}
+                  disabled={added || Boolean(addingPath)}
                   onClick={async () => {
+                    if (addingPath) return;
                     setAddingPath(app.executablePath);
                     try { await onAdd(app); } finally { setAddingPath(null); }
                   }}
@@ -138,7 +161,7 @@ export function InstalledAppsDialog({ existingRules, onAdd, onBrowse, onClose }:
 
         <footer className="app-picker__footer">
           <span>显示能定位到 `.exe` 的桌面软件和 Microsoft Store 应用。</span>
-          <button type="button" className="button button--quiet" onClick={onBrowse}>
+          <button type="button" className="button button--quiet" onClick={onBrowse} disabled={Boolean(addingPath)}>
             <FolderOpen size={17} />浏览其他程序
           </button>
         </footer>

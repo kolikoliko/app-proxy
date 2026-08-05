@@ -7,6 +7,7 @@ import { Sidebar, type NavigationView } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { addRule, checkTunReady, chooseExecutable, createRuleDesktopLauncher, createRuleStartMenuLauncher, getTunStatus, launchRuleWithProxy, loadState, removeRule, saveSettings, syncAutostart, testProxy, updateRule } from "./lib/bridge";
 import { DEFAULT_STATE } from "./lib/defaults";
+import { createSerialQueue, isLatestRequest, settleSubscription } from "./lib/asyncControl";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import type { AppSettings, InstalledApp, PersistedState, ProxyTestResult, ThemeMode, TunStatus } from "./types";
 
@@ -33,10 +34,20 @@ export function App() {
   const [busyAction, setBusyAction] = useState<string>();
   const [activeView, setActiveView] = useState<NavigationView>("apps");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const mutationQueue = useRef(createSerialQueue());
+  const stateEpoch = useRef(0);
+  const latestRefreshRequest = useRef(0);
   const updater = useAppUpdater(state.settings.proxyUrl, loaded);
 
   const refreshFromBackend = useCallback(async () => {
+    const requestId = ++latestRefreshRequest.current;
+    const epochAtStart = stateEpoch.current;
     const [nextState, nextTunStatus] = await Promise.all([loadState(), getTunStatus()]);
+    if (!isLatestRequest(requestId, latestRefreshRequest.current) || epochAtStart !== stateEpoch.current) {
+      return stateRef.current;
+    }
     settingsRef.current = nextState.settings;
     setState(nextState);
     setTunStatus(nextTunStatus);
@@ -52,45 +63,53 @@ export function App() {
   useLayoutEffect(() => {
     const theme = effectiveTheme(state.settings.theme);
     document.documentElement.dataset.theme = theme;
-    document.documentElement.dataset.accent = state.settings.accentColor ?? "green";
+    document.documentElement.dataset.accent = state.settings.accentColor ?? "blue";
   }, [state.settings.theme, state.settings.accentColor]);
 
   const saveSettingsPatch = useCallback(async (patch: Partial<AppSettings>) => {
-    const previous = settingsRef.current;
-    const next = { ...previous, ...patch };
-    settingsRef.current = next;
-    setState((current) => ({ ...current, settings: next }));
-    setError(null);
-    try {
-      if (typeof patch.launchAtLogin === "boolean") await syncAutostart(patch.launchAtLogin);
-      const saved = await saveSettings(next);
-      settingsRef.current = saved.settings;
-      setState(saved);
-      setTunStatus(await getTunStatus());
-    } catch (reason) {
-      setError(String(reason));
+    return mutationQueue.current(async () => {
+      const epoch = ++stateEpoch.current;
+      const previous = settingsRef.current;
+      const next = { ...previous, ...patch };
+      settingsRef.current = next;
+      setState((current) => ({ ...current, settings: next }));
+      setError(null);
       try {
-        await refreshFromBackend();
-      } catch {
-        settingsRef.current = previous;
-        setState((current) => ({ ...current, settings: previous }));
+        if (typeof patch.launchAtLogin === "boolean") await syncAutostart(patch.launchAtLogin);
+        const saved = await saveSettings(next);
+        const nextTunStatus = await getTunStatus();
+        if (epoch === stateEpoch.current) {
+          settingsRef.current = saved.settings;
+          setState(saved);
+          setTunStatus(nextTunStatus);
+        }
+      } catch (reason) {
+        setError(String(reason));
+        await refreshFromBackend().catch(() => {
+          if (epoch === stateEpoch.current) {
+            settingsRef.current = previous;
+            setState((current) => ({ ...current, settings: previous }));
+          }
+        });
       }
-    }
+    });
   }, [refreshFromBackend]);
 
   useEffect(() => {
     let unlistenToggle: (() => void) | undefined;
     let unlistenState: (() => void) | undefined;
+    let disposed = false;
     listen("tray-toggle-tun", () => {
       void saveSettingsPatch({
         tunEnabled: !settingsRef.current.tunEnabled,
         pauseUntil: undefined,
       });
-    }).then((fn) => { unlistenToggle = fn; }).catch(() => undefined);
+    }).then((fn) => settleSubscription(() => disposed, (unsubscribe) => { unlistenToggle = unsubscribe; }, fn)).catch(() => undefined);
     listen("state-changed", () => {
       void refreshFromBackend().catch((reason) => setError(String(reason)));
-    }).then((fn) => { unlistenState = fn; }).catch(() => undefined);
+    }).then((fn) => settleSubscription(() => disposed, (unsubscribe) => { unlistenState = unsubscribe; }, fn)).catch(() => undefined);
     return () => {
+      disposed = true;
       unlistenToggle?.();
       unlistenState?.();
     };
@@ -107,18 +126,24 @@ export function App() {
   }, [state.settings.tunEnabled]);
 
   const applyStateMutation = useCallback(async (operation: () => Promise<PersistedState>) => {
-    setError(null);
-    try {
-      const next = await operation();
-      settingsRef.current = next.settings;
-      setState(next);
-      setTunStatus(await getTunStatus());
-      return next;
-    } catch (reason) {
-      setError(String(reason));
-      try { await refreshFromBackend(); } catch { /* Keep the last usable UI state. */ }
-      throw reason;
-    }
+    return mutationQueue.current(async () => {
+      const epoch = ++stateEpoch.current;
+      setError(null);
+      try {
+        const next = await operation();
+        const nextTunStatus = await getTunStatus();
+        if (epoch === stateEpoch.current) {
+          settingsRef.current = next.settings;
+          setState(next);
+          setTunStatus(nextTunStatus);
+        }
+        return next;
+      } catch (reason) {
+        setError(String(reason));
+        await refreshFromBackend().catch(() => undefined);
+        throw reason;
+      }
+    });
   }, [refreshFromBackend]);
 
   useEffect(() => {

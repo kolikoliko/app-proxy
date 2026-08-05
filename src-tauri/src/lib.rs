@@ -289,10 +289,18 @@ fn create_rule_start_menu_launcher(
 
 #[tauri::command]
 fn get_tun_status(
+    app: tauri::AppHandle,
     store: tauri::State<'_, AppStore>,
     tun: tauri::State<'_, TunManager>,
 ) -> Result<TunStatus, String> {
-    Ok(tun.status(&store.load()?))
+    let status = tun.status(&store.load()?);
+    if status.phase == "error" {
+        if let Ok(disabled) = store.update(|state| state.settings.tun_enabled = false) {
+            let _ = refresh_tray_menu(&app, &disabled);
+            let _ = app.emit("state-changed", ());
+        }
+    }
+    Ok(status)
 }
 
 #[tauri::command]
@@ -373,6 +381,9 @@ fn validate_proxy_url(value: &str) -> Result<url::Url, String> {
     }
     if parsed.host_str().is_none() || parsed.port_or_known_default().is_none() {
         return Err("代理地址必须包含有效的主机和端口".into());
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("代理地址不支持账号密码；请使用不含 userinfo 的代理地址".into());
     }
     Ok(parsed)
 }
@@ -541,4 +552,23 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run app-proxy");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_proxy_url;
+
+    #[test]
+    fn rejects_proxy_userinfo_without_echoing_credentials() {
+        let error = validate_proxy_url("socks://alice:secret@127.0.0.1:7890").unwrap_err();
+        assert!(error.contains("不支持账号密码"));
+        assert!(!error.contains("alice"));
+        assert!(!error.contains("secret"));
+    }
+
+    #[test]
+    fn accepts_unauthenticated_proxy_url() {
+        assert!(validate_proxy_url("socks://127.0.0.1:7890").is_ok());
+        assert!(validate_proxy_url("http://127.0.0.1:7890").is_ok());
+    }
 }

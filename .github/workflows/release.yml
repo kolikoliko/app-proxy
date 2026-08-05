@@ -9,7 +9,12 @@ permissions:
   contents: write
 
 jobs:
+  quality:
+    name: Quality gate
+    uses: ./.github/workflows/quality.yml
+
   windows-x64:
+    needs: quality
     runs-on: windows-latest
     steps:
       - name: Checkout

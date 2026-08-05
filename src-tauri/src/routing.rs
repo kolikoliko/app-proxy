@@ -7,7 +7,10 @@ use std::{
     net::{TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
     thread,
     time::Duration,
 };
@@ -61,6 +64,8 @@ pub struct TunManager {
     config_dir: PathBuf,
     runtime: Mutex<Option<Runtime>>,
     last_error: Mutex<Option<String>>,
+    reconcile_lock: Mutex<()>,
+    request_epoch: AtomicU64,
 }
 
 impl TunManager {
@@ -69,10 +74,17 @@ impl TunManager {
             config_dir,
             runtime: Mutex::new(None),
             last_error: Mutex::new(None),
+            reconcile_lock: Mutex::new(()),
+            request_epoch: AtomicU64::new(0),
         }
     }
 
     pub fn reconcile(&self, state: &PersistedState) -> Result<TunStatus, String> {
+        let request = self.request_epoch.fetch_add(1, Ordering::AcqRel) + 1;
+        let _serial = self.reconcile_lock.lock().map_err(|_| "TUN 串行化锁异常")?;
+        if !self.is_current(request) {
+            return Ok(self.status(state));
+        }
         let should_run = state.settings.tun_enabled
             && state.settings.pause_until.is_none()
             && state.rules.iter().any(|rule| rule.enabled);
@@ -89,13 +101,20 @@ impl TunManager {
                     runtime.config_signature == signature
                         && matches!(runtime.child.try_wait(), Ok(None))
                 });
-            if !already_running {
-                self.restart(state, signature)?;
+            if !already_running && !self.restart(state, signature, request)? {
+                return Ok(self.status(state));
             }
         } else {
             self.stop()?;
+            if let Ok(mut error) = self.last_error.lock() {
+                *error = None;
+            }
         }
         Ok(self.status(state))
+    }
+
+    fn is_current(&self, request: u64) -> bool {
+        self.request_epoch.load(Ordering::Acquire) == request
     }
 
     pub fn check(&self, state: &PersistedState) -> Result<TunStatus, String> {
@@ -133,6 +152,10 @@ impl TunManager {
                     Ok(Some(None)) => true,
                     Ok(None) => false,
                     Err(error) => {
+                        if let Some(mut active) = runtime.take() {
+                            let _ = active.child.kill();
+                            let _ = active.child.wait();
+                        }
                         detected_error = Some(format!("无法读取 sing-box 状态：{error}"));
                         false
                     }
@@ -145,13 +168,15 @@ impl TunManager {
             }
         }
         let last_error = self.last_error.lock().ok().and_then(|value| value.clone());
-        let (phase, message) = if let Some(error) = last_error {
+        let (phase, message) = if !state.settings.tun_enabled {
+            ("stopped", "TUN 已关闭，应用规则保持不变".into())
+        } else if let Some(error) = last_error {
             ("error", error)
         } else if running {
             ("running", "TUN 正在运行，仅代理已开启的应用".into())
-        } else if state.settings.pause_until.is_some() && state.settings.tun_enabled {
+        } else if state.settings.pause_until.is_some() {
             ("paused", "TUN 已定时暂停，应用规则保持不变".into())
-        } else if state.settings.tun_enabled && !state.rules.iter().any(|rule| rule.enabled) {
+        } else if !state.rules.iter().any(|rule| rule.enabled) {
             ("waiting", "TUN 已开启，等待至少一个应用规则".into())
         } else {
             ("stopped", "TUN 已关闭，应用规则保持不变".into())
@@ -164,12 +189,23 @@ impl TunManager {
         }
     }
 
-    fn restart(&self, state: &PersistedState, config_signature: Vec<u8>) -> Result<(), String> {
+    fn restart(
+        &self,
+        state: &PersistedState,
+        config_signature: Vec<u8>,
+        request: u64,
+    ) -> Result<bool, String> {
         self.stop()?;
+        if !self.is_current(request) {
+            return Ok(false);
+        }
         ensure_proxy_reachable(&state.settings.proxy_url)?;
         let config_path = self.write_config(state)?;
         let binary = sing_box_path();
         check_config(&binary, &config_path)?;
+        if !self.is_current(request) {
+            return Ok(false);
+        }
 
         fs::create_dir_all(&self.config_dir)
             .map_err(|error| format!("无法创建运行目录：{error}"))?;
@@ -211,6 +247,12 @@ impl TunManager {
             return Err(message);
         }
 
+        if !self.is_current(request) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(false);
+        }
+
         *self.runtime.lock().map_err(|_| "TUN 运行锁异常")? = Some(Runtime {
             child,
             config_signature,
@@ -219,7 +261,7 @@ impl TunManager {
         if let Ok(mut error) = self.last_error.lock() {
             *error = None;
         }
-        Ok(())
+        Ok(true)
     }
 
     pub fn stop(&self) -> Result<(), String> {
@@ -227,14 +269,16 @@ impl TunManager {
         if let Some(mut active) = runtime.take() {
             // Closing the process also closes the Windows TUN handle. Waiting here
             // makes sure routes are released before a replacement is started.
-            active
-                .child
-                .kill()
-                .map_err(|error| format!("无法停止 sing-box：{error}"))?;
-            active
-                .child
-                .wait()
-                .map_err(|error| format!("等待 sing-box 退出失败：{error}"))?;
+            if !matches!(active.child.try_wait(), Ok(Some(_))) {
+                active
+                    .child
+                    .kill()
+                    .map_err(|error| format!("无法停止 sing-box：{error}"))?;
+                active
+                    .child
+                    .wait()
+                    .map_err(|error| format!("等待 sing-box 退出失败：{error}"))?;
+            }
         }
         Ok(())
     }
@@ -314,6 +358,9 @@ impl Drop for TunManager {
 
 pub fn build_config(state: &PersistedState) -> Result<Value, String> {
     let proxy = url::Url::parse(&state.settings.proxy_url).map_err(|_| "代理地址格式无效")?;
+    if !proxy.username().is_empty() || proxy.password().is_some() {
+        return Err("代理地址不支持账号密码；请使用不含 userinfo 的代理地址".into());
+    }
     let host = proxy.host_str().ok_or("代理地址缺少主机")?;
     let port = proxy.port_or_known_default().ok_or("代理地址缺少端口")?;
     let is_http = proxy.scheme() == "http";
@@ -329,16 +376,6 @@ pub fn build_config(state: &PersistedState) -> Result<Value, String> {
         .filter(|rule| rule.enabled && rule.executable_scope_root.is_none())
         .map(|rule| rule.executable_path.as_str())
         .collect();
-    // Windows may report a process through a normalized/device path that is not
-    // byte-for-byte identical to the installation path. Keep the full-path rule
-    // as the precise match and add an executable-name fallback for classic
-    // desktop apps. Packaged apps remain constrained to their package root.
-    let process_names: Vec<&str> = state
-        .rules
-        .iter()
-        .filter(|rule| rule.enabled && rule.executable_scope_root.is_none())
-        .map(|rule| rule.executable_name.as_str())
-        .collect();
     let process_path_regex: Vec<String> = state
         .rules
         .iter()
@@ -346,7 +383,7 @@ pub fn build_config(state: &PersistedState) -> Result<Value, String> {
         .filter_map(|rule| rule.executable_scope_root.as_deref())
         .filter_map(executable_scope_regex)
         .collect();
-    if process_paths.is_empty() && process_names.is_empty() && process_path_regex.is_empty() {
+    if process_paths.is_empty() && process_path_regex.is_empty() {
         return Err("请先至少开启一个应用规则".into());
     }
 
@@ -359,14 +396,6 @@ pub fn build_config(state: &PersistedState) -> Result<Value, String> {
             &mut route_rules,
             "process_path",
             json!(process_paths),
-            is_http,
-        );
-    }
-    if !process_names.is_empty() {
-        push_app_rules(
-            &mut route_rules,
-            "process_name",
-            json!(process_names),
             is_http,
         );
     }
@@ -534,7 +563,7 @@ fn protocol_note(proxy_url: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_config, check_config, sing_box_path, validate_cidr};
+    use super::{build_config, check_config, sing_box_path, validate_cidr, TunManager};
     use crate::store::{AppRule, PersistedState};
     use serde_json::json;
 
@@ -559,6 +588,22 @@ mod tests {
     }
 
     #[test]
+    fn newer_reconcile_request_supersedes_older_without_admin() {
+        let manager = TunManager::new(std::env::temp_dir().join("app-proxy-routing-test"));
+        let first = manager
+            .request_epoch
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
+            + 1;
+        let second = manager
+            .request_epoch
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
+            + 1;
+        assert!(!manager.is_current(first));
+        assert!(manager.is_current(second));
+        assert_eq!(manager.status(&PersistedState::default()).phase, "stopped");
+    }
+
+    #[test]
     fn socks_routes_selected_process_and_bypasses_lan() {
         let config = build_config(&state("socks://127.0.0.1:7890")).unwrap();
         assert_eq!(config["outbounds"][0]["type"], "socks");
@@ -571,10 +616,15 @@ mod tests {
         assert_eq!(config["route"]["rules"][2]["action"], "sniff");
         assert_eq!(config["route"]["rules"][2]["sniffer"][2], "quic");
         assert_eq!(
-            config["route"]["rules"][5]["process_name"][0],
-            "browser.exe"
+            config["route"]["rules"][3]["process_path"][0],
+            r"C:\Program Files\Browser\browser.exe"
         );
-        assert_eq!(config["route"]["rules"][5]["outbound"], "proxy");
+        assert_eq!(config["route"]["rules"][3]["outbound"], "proxy");
+        assert!(config["route"]["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|rule| rule.get("process_name").is_none()));
         assert!(
             config["inbounds"][0]["route_exclude_address"]
                 .as_array()
@@ -582,6 +632,13 @@ mod tests {
                 .len()
                 >= 8
         );
+    }
+
+    #[test]
+    fn rejects_proxy_userinfo_in_generated_config() {
+        let error = build_config(&state("socks://alice:secret@127.0.0.1:7890")).unwrap_err();
+        assert!(error.contains("不支持账号密码"));
+        assert!(!error.contains("secret"));
     }
 
     #[test]
@@ -594,8 +651,8 @@ mod tests {
             config["route"]["rules"][2]["sniffer"],
             json!(["http", "tls"])
         );
-        assert_eq!(config["route"]["rules"][4]["network"], "tcp");
-        assert_eq!(config["route"]["rules"][5]["network"], "tcp");
+        assert_eq!(config["route"]["rules"][2]["network"], "tcp");
+        assert_eq!(config["route"]["rules"][3]["network"], "tcp");
     }
 
     #[test]

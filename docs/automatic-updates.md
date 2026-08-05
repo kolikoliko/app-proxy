@@ -14,8 +14,8 @@
 
 ## 发布新版本
 
-1. 同步修改 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 中的版本号。
-2. 在本地完成前端构建、Rust 格式检查、Clippy 和测试后推送提交。
+1. 只将 `package.json` 作为版本源更新；运行 `npm run version:check`，确认 `package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`src-tauri/tauri.conf.json` 及 `CHANGELOG.md` 首个版本条目一致。
+2. 在本地完成版本检查、前端构建、Rust 格式检查、Clippy 和测试后推送提交。
 3. 创建并推送完全匹配的标签，例如 `v0.3.2`。
 4. `.github/workflows/release.yml` 只在发布版本标签时运行，在 Windows x64 runner 上构建 NSIS/MSI、更新签名和 `latest.json`，然后发布 GitHub Release；普通推送和 PR 不再运行云端编译检查。
 5. 使用上一正式版本执行一次应用内升级，确认检查、下载、验签、TUN 清理和重启均正常。

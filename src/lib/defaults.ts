@@ -5,7 +5,7 @@ export const DEFAULT_STATE: PersistedState = {
     proxyUrl: "socks://127.0.0.1:7890",
     tunEnabled: false,
     theme: "system",
-    accentColor: "green",
+    accentColor: "blue",
     launchAtLogin: false,
     startMinimized: true,
     bypassLan: true,

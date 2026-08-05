@@ -43,7 +43,7 @@ impl Default for AppSettings {
 }
 
 fn default_accent_color() -> String {
-    "green".into()
+    "blue".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -234,7 +234,7 @@ mod tests {
     use super::{AppRule, AppSettings};
 
     #[test]
-    fn old_settings_migrate_global_switch_and_green_accent() {
+    fn old_settings_migrate_global_switch_and_blue_accent() {
         let raw = r#"{
             "proxyUrl":"socks://127.0.0.1:7890",
             "globalEnabled":true,
@@ -246,7 +246,7 @@ mod tests {
             "exitBehavior":"restore_direct"
         }"#;
         let settings: AppSettings = serde_json::from_str(raw).expect("legacy settings");
-        assert_eq!(settings.accent_color, "green");
+        assert_eq!(settings.accent_color, "blue");
         assert!(settings.tun_enabled);
     }
 
