@@ -163,11 +163,16 @@ mod windows_impl {
                 bgra.len() * mem::size_of::<u32>(),
             )
         };
-        let mut rgba: Vec<u8> = bytes
-            .chunks_exact(4)
-            .flat_map(|pixel| [pixel[2], pixel[1], pixel[0], pixel[3]])
-            .collect();
-        if rgba.chunks_exact(4).all(|pixel| pixel[3] == 0) {
+        let mut rgba = Vec::with_capacity(bytes.len());
+        for index in (0..bytes.len()).step_by(4) {
+            rgba.extend_from_slice(&[
+                bytes[index + 2],
+                bytes[index + 1],
+                bytes[index],
+                bytes[index + 3],
+            ]);
+        }
+        if (3..rgba.len()).step_by(4).all(|index| rgba[index] == 0) {
             // 一些 Electron 程序的图标颜色位图没有写入 alpha，透明区域只保存在
             // Windows 的 AND 蒙版中。此时用蒙版恢复透明度，避免把可用图标误判为空。
             restore_alpha_from_mask(icon_info.hbmMask, width, height, &mut rgba)?;
@@ -226,15 +231,18 @@ mod windows_impl {
                 mask_pixels.len() * mem::size_of::<u32>(),
             )
         };
-        for (pixel, mask_pixel) in rgba.chunks_exact_mut(4).zip(mask_bytes.chunks_exact(4)) {
+        for index in (0..rgba.len()).step_by(4) {
             // AND 蒙版中黑色代表不透明，白色代表透明。
-            pixel[3] = if mask_pixel[0..3].iter().any(|channel| *channel != 0) {
+            rgba[index + 3] = if mask_bytes[index..index + 3]
+                .iter()
+                .any(|channel| *channel != 0)
+            {
                 0
             } else {
                 255
             };
         }
-        if rgba.chunks_exact(4).all(|pixel| pixel[3] == 0) {
+        if (3..rgba.len()).step_by(4).all(|index| rgba[index] == 0) {
             return Err("图标颜色位图和透明蒙版均为空".into());
         }
         Ok(())

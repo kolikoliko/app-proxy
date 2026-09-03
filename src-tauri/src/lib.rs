@@ -547,10 +547,10 @@ mod tests {
     fn tray_uses_the_bundled_blue_application_icon() {
         let icon = tray_icon();
         assert_eq!((icon.width(), icon.height()), (32, 32));
-        assert!(icon
-            .rgba()
-            .chunks_exact(4)
-            .any(|pixel| pixel[2] > 180 && pixel[0] < 80));
+        let rgba = icon.rgba();
+        assert!((0..rgba.len())
+            .step_by(4)
+            .any(|index| rgba[index + 2] > 180 && rgba[index] < 80));
     }
 
     #[test]
