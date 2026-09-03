@@ -56,7 +56,6 @@ dependencies = [
  "png 0.17.16",
  "quick-xml",
  "regex",
- "reqwest",
  "serde",
  "serde_json",
  "tauri",

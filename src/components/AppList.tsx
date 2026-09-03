@@ -1,12 +1,10 @@
 import { AppWindow, LoaderCircle, Menu, MonitorDown, Play, Plus, Trash2 } from "lucide-react";
 import type { AppRule } from "../types";
 import { ApplicationIcon } from "./ApplicationIcon";
-import { Switch } from "./Switch";
 
 type AppListProps = {
   rules: AppRule[];
   onAdd: () => void;
-  onToggle: (id: string, enabled: boolean) => void;
   onRemove: (id: string) => void;
   onProxyLaunch: (id: string) => void;
   onCreateLauncher: (id: string) => void;
@@ -17,7 +15,6 @@ type AppListProps = {
 export function AppList({
   rules,
   onAdd,
-  onToggle,
   onRemove,
   onProxyLaunch,
   onCreateLauncher,
@@ -29,7 +26,7 @@ export function AppList({
       <header className="section-header">
         <div>
           <h1>常用应用</h1>
-          <p>开关控制 TUN 分流；也可以在关闭 TUN 后使用环境代理启动。</p>
+          <p>通过当前代理启动应用，或创建可独立使用的代理快捷方式。</p>
         </div>
         <button type="button" className="button button--primary" onClick={onAdd}>
           <Plus size={18} />
@@ -39,7 +36,7 @@ export function AppList({
 
       <div className="app-list" role="list">
         <div className="app-list__head" aria-hidden="true">
-          <span>应用</span><span>路径</span><span>代理</span><span>启动</span>
+          <span>应用</span><span>路径</span><span>启动</span>
         </div>
         {rules.length === 0 ? (
           <div className="empty-state">
@@ -68,7 +65,6 @@ export function AppList({
               </span>
             </div>
             <span className="app-row__path" title={rule.executablePath}>{rule.executablePath}</span>
-            <Switch checked={rule.enabled} onChange={(enabled) => onToggle(rule.id, enabled)} label={`${rule.displayName} 使用代理`} />
             <div className="app-row__actions">
               <button
                 type="button"
@@ -76,7 +72,7 @@ export function AppList({
                 disabled={Boolean(busyAction)}
                 onClick={() => onProxyLaunch(rule.id)}
                 aria-label={`使用环境代理启动 ${rule.displayName}`}
-                title="环境代理启动（无需 TUN）"
+                title="使用当前代理启动"
               >
                 {busyAction === `launch:${rule.id}` ? <LoaderCircle className="spin" size={16} /> : <Play size={16} />}
               </button>
@@ -115,7 +111,7 @@ export function AppList({
         ))}
       </div>
       <footer className="apps-panel__footer">
-        <span>TUN 用于完整分流；播放键可在关闭 TUN 时按环境变量独立启动。</span>
+        <span>播放键会为目标进程设置临时代理环境，并为 Chromium/Electron 应用附加代理参数。</span>
         <strong>共 {rules.length} 个应用</strong>
       </footer>
     </section>

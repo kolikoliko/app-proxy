@@ -42,10 +42,6 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Fetch verified sing-box binary
-        shell: powershell
-        run: .\scripts\fetch-sing-box.ps1
-
       - name: Build signed installers and publish release
         uses: tauri-apps/tauri-action@v1
         env:

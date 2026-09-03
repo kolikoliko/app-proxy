@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Check,
   CircleAlert,
-  GitBranch,
   LoaderCircle,
   RefreshCw,
   ShieldCheck,
   Trash2,
 } from "lucide-react";
+import gitIcon from "../assets/git.svg";
 import { applyGitProxy, clearGitProxy, getGitProxyStatus } from "../lib/bridge";
 import type { GitProxyStatus } from "../types";
 
@@ -68,7 +68,7 @@ export function ToolProxyPanel({ proxyUrl }: ToolProxyPanelProps) {
         <div>
           <span className="page-kicker">DEVELOPER TOOLING</span>
           <h1 id="tools-title">工具代理</h1>
-          <p>读取并管理开发工具自己的代理配置，不依赖 TUN 是否开启。</p>
+          <p>读取并管理开发工具自己的代理配置，独立于应用启动器。</p>
         </div>
         <div className="proxy-source" aria-label="当前应用代理">
           <span className="proxy-source__pulse" />
@@ -92,7 +92,7 @@ export function ToolProxyPanel({ proxyUrl }: ToolProxyPanelProps) {
         <div className="tool-card__rail" />
         <header className="tool-card__header">
           <div className="tool-identity">
-            <span className="tool-identity__icon"><GitBranch size={25} /></span>
+            <span className="tool-identity__icon"><img src={gitIcon} alt="" /></span>
             <span>
               <span className="tool-identity__eyebrow">版本控制</span>
               <strong>Git</strong>

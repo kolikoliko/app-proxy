@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { DEFAULT_STATE } from "./defaults";
-import type { AppRule, AppSettings, GitProxyStatus, InstalledApp, LauncherResult, PersistedState, ProxyTestResult, TunStatus } from "../types";
+import type { AppRule, AppSettings, GitProxyStatus, InstalledApp, LauncherResult, PersistedState, ProxyTestResult } from "../types";
 
 const STORAGE_KEY = "app-proxy-state-v1";
 
@@ -27,23 +27,33 @@ function readBrowserState(): PersistedState {
   try {
     const stored = JSON.parse(raw) as Partial<PersistedState>;
     const defaults = structuredClone(DEFAULT_STATE);
-    const legacySettings = stored.settings as (Partial<AppSettings> & { globalEnabled?: boolean }) | undefined;
-    const { globalEnabled, ...currentSettings } = legacySettings ?? {};
+    const currentSettings = stored.settings;
     return {
       ...defaults,
       ...stored,
       settings: {
-        ...defaults.settings,
-        ...currentSettings,
-        tunEnabled: currentSettings.tunEnabled ?? globalEnabled ?? defaults.settings.tunEnabled,
+        proxyUrl: currentSettings?.proxyUrl ?? defaults.settings.proxyUrl,
+        launcherSuffix: currentSettings?.launcherSuffix ?? defaults.settings.launcherSuffix,
+        theme: currentSettings?.theme ?? defaults.settings.theme,
+        accentColor: currentSettings?.accentColor ?? defaults.settings.accentColor,
+        launchAtLogin: currentSettings?.launchAtLogin ?? defaults.settings.launchAtLogin,
+        startMinimized: currentSettings?.startMinimized ?? defaults.settings.startMinimized,
       },
       rules: (stored.rules ?? defaults.rules).map((rule) => {
         const executableScopeRoot = rule.executableScopeRoot
           ?? inferBrowserPackageScope(rule.executablePath, rule.packageFamilyName);
         return {
-          ...rule,
+          id: rule.id,
+          displayName: rule.displayName,
+          executablePath: rule.executablePath,
+          executableName: rule.executableName,
+          packageFamilyName: rule.packageFamilyName,
+          applicationId: rule.applicationId,
           executableScopeRoot,
           scopeExecutableCount: rule.scopeExecutableCount ?? (executableScopeRoot ? 1 : 0),
+          pinned: rule.pinned,
+          createdAt: rule.createdAt,
+          updatedAt: rule.updatedAt,
         };
       }),
     } as PersistedState;
@@ -108,7 +118,6 @@ export async function addRule(
     applicationId,
     executableScopeRoot,
     scopeExecutableCount: executableScopeRoot ? 8 : 0,
-    enabled: true,
     pinned: true,
     createdAt: now,
     updatedAt: now,
@@ -163,16 +172,6 @@ export async function getAppIcon(executablePath: string): Promise<string | null>
   return "/app-icon.svg";
 }
 
-export async function updateRule(id: string, enabled: boolean): Promise<PersistedState> {
-  if (isTauriRuntime()) return invoke<PersistedState>("update_rule", { id, enabled });
-  const state = readBrowserState();
-  state.rules = state.rules.map((rule) =>
-    rule.id === id ? { ...rule, enabled, updatedAt: new Date().toISOString() } : rule,
-  );
-  writeBrowserState(state);
-  return state;
-}
-
 export async function removeRule(id: string): Promise<PersistedState> {
   if (isTauriRuntime()) return invoke<PersistedState>("remove_rule", { id });
   const state = readBrowserState();
@@ -195,26 +194,30 @@ export async function launchRuleWithProxy(id: string): Promise<LauncherResult> {
 
 export async function createRuleDesktopLauncher(id: string): Promise<LauncherResult> {
   if (isTauriRuntime()) return invoke<LauncherResult>("create_rule_desktop_launcher", { id });
-  const rule = readBrowserState().rules.find((item) => item.id === id);
+  const state = readBrowserState();
+  const rule = state.rules.find((item) => item.id === id);
   const displayName = rule?.displayName ?? "应用";
+  const shortcutName = `${displayName}${state.settings.launcherSuffix}`;
   await new Promise((resolve) => window.setTimeout(resolve, 260));
   return {
-    message: `已创建“${displayName} - 应用代理”桌面启动器；关闭应用代理后仍可使用`,
+    message: `已创建“${shortcutName}”桌面启动器；关闭应用代理后仍可使用`,
     launcherPath: `C:\\Users\\User\\AppData\\Local\\应用代理\\launchers\\${id}\\Launch-With-Proxy.cmd`,
-    shortcutPath: `C:\\Users\\User\\Desktop\\${displayName} - 应用代理.lnk`,
+    shortcutPath: `C:\\Users\\User\\Desktop\\${shortcutName}.lnk`,
     chromiumMode: true,
   };
 }
 
 export async function createRuleStartMenuLauncher(id: string): Promise<LauncherResult> {
   if (isTauriRuntime()) return invoke<LauncherResult>("create_rule_start_menu_launcher", { id });
-  const rule = readBrowserState().rules.find((item) => item.id === id);
+  const state = readBrowserState();
+  const rule = state.rules.find((item) => item.id === id);
   const displayName = rule?.displayName ?? "应用";
+  const shortcutName = `${displayName}${state.settings.launcherSuffix}`;
   await new Promise((resolve) => window.setTimeout(resolve, 260));
   return {
-    message: `已添加“${displayName} - 应用代理”至开始菜单的“所有应用”；可在开始菜单中右键选择“固定到开始屏幕”（浏览器预览）`,
+    message: `已添加“${shortcutName}”至开始菜单的“所有应用”；可在开始菜单中右键选择“固定到开始屏幕”（浏览器预览）`,
     launcherPath: `C:\\Users\\User\\AppData\\Local\\应用代理\\launchers\\${id}\\Launch-With-Proxy.cmd`,
-    shortcutPath: `C:\\Users\\User\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\应用代理\\${displayName} - 应用代理.lnk`,
+    shortcutPath: `C:\\Users\\User\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\应用代理\\${shortcutName}.lnk`,
     chromiumMode: true,
   };
 }
@@ -266,50 +269,9 @@ export async function clearGitProxy(): Promise<GitProxyStatus> {
   return browserGitProxyStatus();
 }
 
-function browserTunStatus(state: PersistedState): TunStatus {
-  const enabledApps = state.rules.filter((rule) => rule.enabled).length;
-  const protocolNote = state.settings.proxyUrl.startsWith("http://")
-    ? "HTTP 上游仅代理 TCP；应用的 UDP 流量保持直连。需要 UDP 时请使用 SOCKS5。"
-    : undefined;
-  if (state.settings.tunEnabled && state.settings.pauseUntil) {
-    return { phase: "paused", message: "TUN 已定时暂停，应用规则保持不变", kernelVersion: "1.13.12", protocolNote };
-  }
-  if (state.settings.tunEnabled && enabledApps === 0) {
-    return { phase: "waiting", message: "TUN 已开启，等待至少一个应用规则", kernelVersion: "1.13.12", protocolNote };
-  }
-  if (state.settings.tunEnabled) {
-    return { phase: "running", message: "TUN 正在运行，仅代理已开启的应用", kernelVersion: "1.13.12", protocolNote };
-  }
-  return { phase: "stopped", message: "TUN 已关闭，应用规则保持不变", kernelVersion: "1.13.12", protocolNote };
-}
-
-export async function getTunStatus(): Promise<TunStatus> {
-  if (isTauriRuntime()) return invoke<TunStatus>("get_tun_status");
-  return browserTunStatus(readBrowserState());
-}
-
-export async function checkTunReady(): Promise<TunStatus> {
-  if (isTauriRuntime()) return invoke<TunStatus>("check_tun_ready");
-  const state = readBrowserState();
-  if (!state.rules.some((rule) => rule.enabled)) throw new Error("请先至少开启一个应用规则");
-  return {
-    ...browserTunStatus(state),
-    phase: "ready",
-    message: "TUN 配置校验通过，内核已就绪",
-  };
-}
-
 export async function syncAutostart(enabled: boolean): Promise<void> {
   if (!isTauriRuntime()) return;
   const current = await isEnabled();
   if (enabled && !current) await enable();
   if (!enabled && current) await disable();
-}
-
-export async function prepareForUpdate(): Promise<void> {
-  if (isTauriRuntime()) await invoke("prepare_for_update");
-}
-
-export async function resumeAfterUpdateFailure(): Promise<void> {
-  if (isTauriRuntime()) await invoke("resume_after_update_failure");
 }

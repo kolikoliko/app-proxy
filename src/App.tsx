@@ -1,22 +1,15 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AppList } from "./components/AppList";
 import { InstalledAppsDialog } from "./components/InstalledAppsDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { Sidebar, type NavigationView } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { ToolProxyPanel } from "./components/ToolProxyPanel";
-import { addRule, checkTunReady, chooseExecutable, createRuleDesktopLauncher, createRuleStartMenuLauncher, getTunStatus, launchRuleWithProxy, loadState, removeRule, saveSettings, syncAutostart, testProxy, updateRule } from "./lib/bridge";
+import { addRule, chooseExecutable, createRuleDesktopLauncher, createRuleStartMenuLauncher, launchRuleWithProxy, loadState, removeRule, saveSettings, syncAutostart, testProxy } from "./lib/bridge";
 import { DEFAULT_STATE } from "./lib/defaults";
-import { createSerialQueue, isLatestRequest, settleSubscription } from "./lib/asyncControl";
+import { createSerialQueue, isLatestRequest } from "./lib/asyncControl";
 import { useAppUpdater } from "./hooks/useAppUpdater";
-import type { AppSettings, InstalledApp, PersistedState, ProxyTestResult, ThemeMode, TunStatus } from "./types";
-
-const STOPPED_TUN_STATUS: TunStatus = {
-  phase: "stopped",
-  message: "TUN 已关闭，应用规则保持不变",
-  kernelVersion: "1.13.12",
-};
+import type { AppSettings, InstalledApp, PersistedState, ProxyTestResult, ThemeMode } from "./types";
 
 function effectiveTheme(theme: ThemeMode) {
   if (theme !== "system") return theme;
@@ -26,7 +19,6 @@ function effectiveTheme(theme: ThemeMode) {
 export function App() {
   const [state, setState] = useState<PersistedState>(DEFAULT_STATE);
   const settingsRef = useRef<AppSettings>(DEFAULT_STATE.settings);
-  const [tunStatus, setTunStatus] = useState<TunStatus>(STOPPED_TUN_STATUS);
   const [loaded, setLoaded] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ProxyTestResult | null>(null);
@@ -45,13 +37,12 @@ export function App() {
   const refreshFromBackend = useCallback(async () => {
     const requestId = ++latestRefreshRequest.current;
     const epochAtStart = stateEpoch.current;
-    const [nextState, nextTunStatus] = await Promise.all([loadState(), getTunStatus()]);
+    const nextState = await loadState();
     if (!isLatestRequest(requestId, latestRefreshRequest.current) || epochAtStart !== stateEpoch.current) {
       return stateRef.current;
     }
     settingsRef.current = nextState.settings;
     setState(nextState);
-    setTunStatus(nextTunStatus);
     return nextState;
   }, []);
 
@@ -78,11 +69,9 @@ export function App() {
       try {
         if (typeof patch.launchAtLogin === "boolean") await syncAutostart(patch.launchAtLogin);
         const saved = await saveSettings(next);
-        const nextTunStatus = await getTunStatus();
         if (epoch === stateEpoch.current) {
           settingsRef.current = saved.settings;
           setState(saved);
-          setTunStatus(nextTunStatus);
         }
       } catch (reason) {
         setError(String(reason));
@@ -96,47 +85,15 @@ export function App() {
     });
   }, [refreshFromBackend]);
 
-  useEffect(() => {
-    let unlistenToggle: (() => void) | undefined;
-    let unlistenState: (() => void) | undefined;
-    let disposed = false;
-    listen("tray-toggle-tun", () => {
-      void saveSettingsPatch({
-        tunEnabled: !settingsRef.current.tunEnabled,
-        pauseUntil: undefined,
-      });
-    }).then((fn) => settleSubscription(() => disposed, (unsubscribe) => { unlistenToggle = unsubscribe; }, fn)).catch(() => undefined);
-    listen("state-changed", () => {
-      void refreshFromBackend().catch((reason) => setError(String(reason)));
-    }).then((fn) => settleSubscription(() => disposed, (unsubscribe) => { unlistenState = unsubscribe; }, fn)).catch(() => undefined);
-    return () => {
-      disposed = true;
-      unlistenToggle?.();
-      unlistenState?.();
-    };
-  }, [refreshFromBackend, saveSettingsPatch]);
-
-  useEffect(() => {
-    if (!state.settings.tunEnabled) return;
-    const timer = window.setInterval(() => {
-      void getTunStatus()
-        .then(setTunStatus)
-        .catch((reason) => setError(String(reason)));
-    }, 5_000);
-    return () => window.clearInterval(timer);
-  }, [state.settings.tunEnabled]);
-
   const applyStateMutation = useCallback(async (operation: () => Promise<PersistedState>) => {
     return mutationQueue.current(async () => {
       const epoch = ++stateEpoch.current;
       setError(null);
       try {
         const next = await operation();
-        const nextTunStatus = await getTunStatus();
         if (epoch === stateEpoch.current) {
           settingsRef.current = next.settings;
           setState(next);
-          setTunStatus(nextTunStatus);
         }
         return next;
       } catch (reason) {
@@ -146,22 +103,6 @@ export function App() {
       }
     });
   }, [refreshFromBackend]);
-
-  useEffect(() => {
-    const pauseUntil = state.settings.pauseUntil;
-    if (!pauseUntil || pauseUntil === "manual") return;
-    const remaining = new Date(pauseUntil).getTime() - Date.now();
-    if (!Number.isFinite(remaining)) return;
-    if (remaining <= 0) {
-      void saveSettingsPatch({ pauseUntil: undefined });
-      return;
-    }
-    const timer = window.setTimeout(
-      () => void saveSettingsPatch({ pauseUntil: undefined }),
-      Math.min(remaining, 2_147_000_000),
-    );
-    return () => window.clearTimeout(timer);
-  }, [state.settings.pauseUntil, saveSettingsPatch]);
 
   const handleBrowse = useCallback(async () => {
     const selected = await chooseExecutable();
@@ -214,16 +155,7 @@ export function App() {
     try {
       if (proxyUrl !== state.settings.proxyUrl) await saveSettingsPatch({ proxyUrl });
       const proxyResult = await testProxy(proxyUrl);
-      if (proxyResult.reachable && state.rules.some((rule) => rule.enabled)) {
-        await checkTunReady();
-        setTunStatus(await getTunStatus());
-        setTestResult({
-          ...proxyResult,
-          message: `${proxyResult.message}；TUN 配置有效`,
-        });
-      } else {
-        setTestResult(proxyResult);
-      }
+      setTestResult(proxyResult);
     } catch (reason) {
       setTestResult({ reachable: false, message: String(reason) });
     } finally {
@@ -231,7 +163,6 @@ export function App() {
     }
   }, [saveSettingsPatch, state.settings.proxyUrl]);
 
-  const enabledApps = useMemo(() => state.rules.filter((rule) => rule.enabled).length, [state.rules]);
   if (!loaded) return <div className="app-loading">正在加载本地配置…</div>;
 
   return (
@@ -255,16 +186,12 @@ export function App() {
         {activeView === "apps" ? (
           <>
             <StatusBar
-              requestedEnabled={state.settings.tunEnabled}
-              status={tunStatus}
-              enabledApps={enabledApps}
+              appCount={state.rules.length}
               proxyUrl={state.settings.proxyUrl}
-              onToggle={(tunEnabled) => void saveSettingsPatch({ tunEnabled, pauseUntil: undefined })}
             />
             <AppList
               rules={state.rules}
               onAdd={() => setPickerOpen(true)}
-              onToggle={(id, enabled) => void applyStateMutation(() => updateRule(id, enabled)).catch(() => undefined)}
               onRemove={(id) => void applyStateMutation(() => removeRule(id)).catch(() => undefined)}
               onProxyLaunch={(id) => void handleLauncherAction(id, "launch")}
               onCreateLauncher={(id) => void handleLauncherAction(id, "shortcut")}
@@ -278,27 +205,18 @@ export function App() {
           <section className="settings-page" aria-labelledby="settings-title">
             <header className="page-header">
               <h1 id="settings-title">设置</h1>
-              <p>管理代理连接、自动化行为和网络安全选项。</p>
+              <p>管理代理连接、外观、启动行为和应用更新。</p>
             </header>
             <SettingsPanel
               settings={state.settings}
               testing={testing}
               testResult={testResult}
-              tunStatus={tunStatus}
               updater={updater}
               onChange={(patch) => void saveSettingsPatch(patch)}
               onProxyCommit={(proxyUrl) => {
                 if (proxyUrl !== state.settings.proxyUrl) void saveSettingsPatch({ proxyUrl });
               }}
               onTest={handleTest}
-              onPause={(minutes) => {
-                const pauseUntil = minutes === 0
-                  ? undefined
-                  : minutes === null
-                    ? "manual"
-                    : new Date(Date.now() + minutes * 60_000).toISOString();
-                void saveSettingsPatch({ pauseUntil });
-              }}
             />
           </section>
         )}

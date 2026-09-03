@@ -1,27 +1,13 @@
 export type ThemeMode = "system" | "light" | "dark";
 export type AccentColor = "green" | "blue" | "purple" | "yellow" | "rose" | "cyan";
-export type ExitBehavior = "restore_direct" | "keep_routing";
 
 export type AppSettings = {
   proxyUrl: string;
-  tunEnabled: boolean;
+  launcherSuffix: string;
   theme: ThemeMode;
   accentColor: AccentColor;
   launchAtLogin: boolean;
   startMinimized: boolean;
-  bypassLan: boolean;
-  additionalBypassCidrs: string[];
-  exitBehavior: ExitBehavior;
-  pauseUntil?: string;
-};
-
-export type TunPhase = "stopped" | "ready" | "running" | "paused" | "waiting" | "error";
-
-export type TunStatus = {
-  phase: TunPhase;
-  message: string;
-  kernelVersion: string;
-  protocolNote?: string;
 };
 
 export type AppRule = {
@@ -33,7 +19,6 @@ export type AppRule = {
   applicationId?: string;
   executableScopeRoot?: string;
   scopeExecutableCount?: number;
-  enabled: boolean;
   pinned: boolean;
   createdAt: string;
   updatedAt: string;

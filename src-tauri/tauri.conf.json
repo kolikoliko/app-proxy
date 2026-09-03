@@ -36,7 +36,6 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/sing-box"],
     "resources": ["../LICENSE", "../THIRD_PARTY_NOTICES.md"],
     "publisher": "kolikoliko",
     "homepage": "https://github.com/kolikoliko/app-proxy",
@@ -51,7 +50,7 @@
     },
     "copyright": "Copyright App Proxy contributors",
     "category": "Utility",
-    "shortDescription": "按应用控制本地代理分流"
+    "shortDescription": "使用本地代理按需启动 Windows 应用"
   },
   "plugins": {
     "updater": {

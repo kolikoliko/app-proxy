@@ -1,13 +1,11 @@
 mod icon_extractor;
 mod installed_apps;
 mod launcher;
-mod routing;
 mod store;
 mod tool_proxy;
 
 use installed_apps::InstalledApp;
 use launcher::LauncherResult;
-use routing::{TunManager, TunStatus};
 use serde::Serialize;
 use std::{
     net::{TcpStream, ToSocketAddrs},
@@ -16,9 +14,9 @@ use std::{
 use store::{AppSettings, AppStore, PersistedState};
 use tauri::{
     image::Image,
-    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    Emitter, Manager,
+    Manager,
 };
 use tool_proxy::GitProxyStatus;
 
@@ -39,87 +37,30 @@ fn load_state(store: tauri::State<'_, AppStore>) -> Result<PersistedState, Strin
 fn save_settings(
     mut settings: AppSettings,
     store: tauri::State<'_, AppStore>,
-    tun: tauri::State<'_, TunManager>,
     app: tauri::AppHandle,
 ) -> Result<PersistedState, String> {
-    // Until a separately supervised helper exists, leaving routes behind is not
-    // safe. Normalize legacy/preview state to the fail-safe behavior.
-    settings.exit_behavior = "restore_direct".into();
     validate_proxy_url(&settings.proxy_url)?;
+    settings.launcher_suffix = settings.launcher_suffix.trim().to_string();
+    if settings.launcher_suffix.chars().count() > 40 {
+        return Err("快捷方式后缀不能超过 40 个字符".into());
+    }
+    if settings.launcher_suffix.chars().any(|character| {
+        matches!(
+            character,
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+        )
+    }) {
+        return Err("快捷方式后缀不能包含 Windows 文件名非法字符".into());
+    }
     if !matches!(
         settings.accent_color.as_str(),
         "green" | "blue" | "purple" | "yellow" | "rose" | "cyan"
     ) {
         return Err("不支持的主题色".into());
     }
-    for cidr in &settings.additional_bypass_cidrs {
-        if !routing::validate_cidr(cidr) {
-            return Err(format!("无效的绕过网段：{cidr}"));
-        }
-    }
-    let previous = store.load()?;
-    let needs_elevation =
-        settings.tun_enabled && !previous.settings.tun_enabled && !is_process_elevated();
-    if needs_elevation && cfg!(debug_assertions) {
-        return Err(
-            "开发模式无法在提权重启后保留 Vite 服务。请退出当前进程，以管理员身份打开 PowerShell，再运行 npm run tauri dev；正式安装版会自动请求 UAC。"
-                .into(),
-        );
-    }
     let updated = store.update(|state| state.settings = settings)?;
-    if needs_elevation {
-        if let Err(error) = relaunch_elevated() {
-            let _ = store.update(|state| state.settings.tun_enabled = false);
-            return Err(error);
-        }
-        app.exit(0);
-        return Ok(updated);
-    }
-    reconcile_or_disable(&app, &store, &tun, updated)
-}
-
-#[cfg(windows)]
-fn is_process_elevated() -> bool {
-    // SAFETY: IsUserAnAdmin takes no pointers and only reads the current token.
-    unsafe { windows::Win32::UI::Shell::IsUserAnAdmin().as_bool() }
-}
-
-#[cfg(not(windows))]
-fn is_process_elevated() -> bool {
-    false
-}
-
-#[cfg(windows)]
-fn relaunch_elevated() -> Result<(), String> {
-    use windows::{
-        core::{HSTRING, PCWSTR},
-        Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL},
-    };
-
-    let executable =
-        std::env::current_exe().map_err(|error| format!("无法确定程序路径：{error}"))?;
-    let operation = HSTRING::from("runas");
-    let file = HSTRING::from(executable.as_os_str());
-    // SAFETY: All strings are owned for the duration of the synchronous call.
-    let result = unsafe {
-        ShellExecuteW(
-            None,
-            &operation,
-            &file,
-            PCWSTR::null(),
-            PCWSTR::null(),
-            SW_SHOWNORMAL,
-        )
-    };
-    if result.0 as isize <= 32 {
-        return Err("开启 TUN 需要管理员权限；已取消 Windows 权限请求".into());
-    }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-fn relaunch_elevated() -> Result<(), String> {
-    Err("TUN 模式当前仅支持 Windows".into())
+    refresh_tray_menu(&app, &updated)?;
+    Ok(updated)
 }
 
 #[tauri::command]
@@ -129,7 +70,6 @@ fn add_rule(
     package_family_name: Option<String>,
     application_id: Option<String>,
     store: tauri::State<'_, AppStore>,
-    tun: tauri::State<'_, TunManager>,
     app: tauri::AppHandle,
 ) -> Result<PersistedState, String> {
     let package_scope = package_family_name.as_deref().and_then(|family| {
@@ -152,7 +92,8 @@ fn add_rule(
             .map(|scope| scope.executable_count)
             .unwrap_or_default(),
     )?;
-    reconcile_or_disable(&app, &store, &tun, updated)
+    refresh_tray_menu(&app, &updated)?;
+    Ok(updated)
 }
 
 fn refresh_package_rule_scopes(store: &AppStore) -> Result<PersistedState, String> {
@@ -212,34 +153,17 @@ async fn get_app_icon(executable_path: String) -> Result<Option<String>, String>
 }
 
 #[tauri::command]
-fn update_rule(
-    id: String,
-    enabled: bool,
-    store: tauri::State<'_, AppStore>,
-    tun: tauri::State<'_, TunManager>,
-    app: tauri::AppHandle,
-) -> Result<PersistedState, String> {
-    let updated = store.update(|state| {
-        if let Some(rule) = state.rules.iter_mut().find(|rule| rule.id == id) {
-            rule.enabled = enabled;
-            rule.updated_at = store::now_string();
-        }
-    })?;
-    reconcile_or_disable(&app, &store, &tun, updated)
-}
-
-#[tauri::command]
 fn remove_rule(
     id: String,
     store: tauri::State<'_, AppStore>,
-    tun: tauri::State<'_, TunManager>,
     app: tauri::AppHandle,
 ) -> Result<PersistedState, String> {
     let updated = store.update(|state| state.rules.retain(|rule| rule.id != id))?;
-    reconcile_or_disable(&app, &store, &tun, updated)
+    refresh_tray_menu(&app, &updated)?;
+    Ok(updated)
 }
 
-fn launcher_rule(store: &AppStore, id: &str) -> Result<(store::AppRule, String), String> {
+fn launcher_rule(store: &AppStore, id: &str) -> Result<(store::AppRule, String, String), String> {
     let state = store.load()?;
     let mut rule = state
         .rules
@@ -256,7 +180,11 @@ fn launcher_rule(store: &AppStore, id: &str) -> Result<(store::AppRule, String),
         rule.executable_scope_root = Some(resolved.executable_scope_root);
         rule.scope_executable_count = resolved.executable_count;
     }
-    Ok((rule, state.settings.proxy_url))
+    Ok((
+        rule,
+        state.settings.proxy_url,
+        state.settings.launcher_suffix,
+    ))
 }
 
 #[tauri::command]
@@ -265,7 +193,7 @@ fn launch_rule_with_proxy(
     store: tauri::State<'_, AppStore>,
     app: tauri::AppHandle,
 ) -> Result<LauncherResult, String> {
-    let (rule, proxy_url) = launcher_rule(&store, &id)?;
+    let (rule, proxy_url, _) = launcher_rule(&store, &id)?;
     launcher::launch_with_proxy(&app, &rule, &proxy_url)
 }
 
@@ -275,8 +203,8 @@ fn create_rule_desktop_launcher(
     store: tauri::State<'_, AppStore>,
     app: tauri::AppHandle,
 ) -> Result<LauncherResult, String> {
-    let (rule, proxy_url) = launcher_rule(&store, &id)?;
-    launcher::create_desktop_launcher(&app, &rule, &proxy_url)
+    let (rule, proxy_url, launcher_suffix) = launcher_rule(&store, &id)?;
+    launcher::create_desktop_launcher(&app, &rule, &proxy_url, &launcher_suffix)
 }
 
 #[tauri::command]
@@ -285,63 +213,8 @@ fn create_rule_start_menu_launcher(
     store: tauri::State<'_, AppStore>,
     app: tauri::AppHandle,
 ) -> Result<LauncherResult, String> {
-    let (rule, proxy_url) = launcher_rule(&store, &id)?;
-    launcher::create_start_menu_launcher(&app, &rule, &proxy_url)
-}
-
-#[tauri::command]
-fn get_tun_status(
-    app: tauri::AppHandle,
-    store: tauri::State<'_, AppStore>,
-    tun: tauri::State<'_, TunManager>,
-) -> Result<TunStatus, String> {
-    let status = tun.status(&store.load()?);
-    if status.phase == "error" {
-        if let Ok(disabled) = store.update(|state| state.settings.tun_enabled = false) {
-            let _ = refresh_tray_menu(&app, &disabled);
-            let _ = app.emit("state-changed", ());
-        }
-    }
-    Ok(status)
-}
-
-#[tauri::command]
-fn check_tun_ready(
-    store: tauri::State<'_, AppStore>,
-    tun: tauri::State<'_, TunManager>,
-) -> Result<TunStatus, String> {
-    tun.check(&store.load()?)
-}
-
-#[tauri::command]
-fn prepare_for_update(tun: tauri::State<'_, TunManager>) -> Result<(), String> {
-    tun.stop()
-}
-
-#[tauri::command]
-fn resume_after_update_failure(
-    store: tauri::State<'_, AppStore>,
-    tun: tauri::State<'_, TunManager>,
-) -> Result<(), String> {
-    tun.reconcile(&store.load()?).map(|_| ())
-}
-
-fn reconcile_or_disable(
-    app: &tauri::AppHandle,
-    store: &AppStore,
-    tun: &TunManager,
-    state: PersistedState,
-) -> Result<PersistedState, String> {
-    if let Err(error) = tun.reconcile(&state) {
-        let _ = tun.stop();
-        if let Ok(disabled) = store.update(|current| current.settings.tun_enabled = false) {
-            let _ = refresh_tray_menu(app, &disabled);
-        }
-        return Err(error);
-    }
-    refresh_tray_menu(app, &state)?;
-    let _ = app.emit("state-changed", ());
-    Ok(state)
+    let (rule, proxy_url, launcher_suffix) = launcher_rule(&store, &id)?;
+    launcher::create_start_menu_launcher(&app, &rule, &proxy_url, &launcher_suffix)
 }
 
 #[tauri::command]
@@ -402,8 +275,8 @@ async fn clear_git_proxy(store: tauri::State<'_, AppStore>) -> Result<GitProxySt
 fn validate_proxy_url(value: &str) -> Result<url::Url, String> {
     let parsed = url::Url::parse(value)
         .map_err(|_| "代理地址格式无效，请使用 socks://主机:端口 或 http://主机:端口")?;
-    if !matches!(parsed.scheme(), "socks" | "socks5" | "http") {
-        return Err("首版仅支持 SOCKS5 和 HTTP 代理".into());
+    if !matches!(parsed.scheme(), "socks" | "socks5" | "http" | "https") {
+        return Err("仅支持 SOCKS、HTTP 和 HTTPS 代理".into());
     }
     if parsed.host_str().is_none() || parsed.port_or_known_default().is_none() {
         return Err("代理地址必须包含有效的主机和端口".into());
@@ -445,26 +318,18 @@ fn build_tray_menu(
 ) -> tauri::Result<Menu<tauri::Wry>> {
     let menu = Menu::new(app)?;
     let show = MenuItem::with_id(app, "show", "打开管理窗口", true, None::<&str>)?;
-    let tun_label = if state.settings.tun_enabled {
-        "关闭 TUN"
-    } else {
-        "开启 TUN"
-    };
-    let toggle = MenuItem::with_id(app, "toggle", tun_label, true, None::<&str>)?;
     menu.append(&show)?;
-    menu.append(&toggle)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
 
     if !state.rules.is_empty() {
         let heading = MenuItem::with_id(app, "apps-heading", "常用应用", false, None::<&str>)?;
         menu.append(&heading)?;
         for rule in state.rules.iter().filter(|rule| rule.pinned).take(12) {
-            let item = CheckMenuItem::with_id(
+            let item = MenuItem::with_id(
                 app,
-                format!("rule:{}", rule.id),
-                &rule.display_name,
+                format!("launch:{}", rule.id),
+                format!("使用代理启动 {}", rule.display_name),
                 true,
-                rule.enabled,
                 None::<&str>,
             )?;
             menu.append(&item)?;
@@ -496,19 +361,11 @@ pub fn run() {
         )
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
-            let store = AppStore::new(config_dir.clone());
+            let store = AppStore::new(config_dir);
             store.ensure().map_err(std::io::Error::other)?;
             refresh_package_rule_scopes(&store).map_err(std::io::Error::other)?;
-            let tun = TunManager::new(config_dir);
-            if let Ok(state) = store.load() {
-                if let Err(error) = tun.reconcile(&state) {
-                    eprintln!("无法恢复 TUN：{error}");
-                    let _ = store.update(|current| current.settings.tun_enabled = false);
-                }
-            }
             let initial_state = store.load().map_err(std::io::Error::other)?;
             app.manage(store);
-            app.manage(tun);
             let menu = build_tray_menu(app.handle(), &initial_state)?;
 
             TrayIconBuilder::with_id("main")
@@ -523,23 +380,12 @@ pub fn run() {
                             let _ = window.set_focus();
                         }
                     }
-                    "toggle" => {
-                        let _ = app.emit("tray-toggle-tun", ());
-                    }
                     "quit" => app.exit(0),
-                    id if id.starts_with("rule:") => {
-                        let rule_id = id.trim_start_matches("rule:");
+                    id if id.starts_with("launch:") => {
+                        let rule_id = id.trim_start_matches("launch:");
                         let store = app.state::<AppStore>();
-                        let tun = app.state::<TunManager>();
-                        if let Ok(updated) = store.update(|state| {
-                            if let Some(rule) =
-                                state.rules.iter_mut().find(|rule| rule.id == rule_id)
-                            {
-                                rule.enabled = !rule.enabled;
-                                rule.updated_at = store::now_string();
-                            }
-                        }) {
-                            let _ = reconcile_or_disable(app, &store, &tun, updated);
+                        if let Ok((rule, proxy_url, _)) = launcher_rule(&store, rule_id) {
+                            let _ = launcher::launch_with_proxy(app, &rule, &proxy_url);
                         }
                     }
                     _ => {}
@@ -565,7 +411,6 @@ pub fn run() {
             add_rule,
             list_installed_apps,
             get_app_icon,
-            update_rule,
             remove_rule,
             launch_rule_with_proxy,
             create_rule_desktop_launcher,
@@ -573,11 +418,7 @@ pub fn run() {
             test_proxy,
             get_git_proxy_status,
             apply_git_proxy,
-            clear_git_proxy,
-            get_tun_status,
-            check_tun_ready,
-            prepare_for_update,
-            resume_after_update_failure
+            clear_git_proxy
         ])
         .run(tauri::generate_context!())
         .expect("failed to run app-proxy");
@@ -599,5 +440,6 @@ mod tests {
     fn accepts_unauthenticated_proxy_url() {
         assert!(validate_proxy_url("socks://127.0.0.1:7890").is_ok());
         assert!(validate_proxy_url("http://127.0.0.1:7890").is_ok());
+        assert!(validate_proxy_url("https://127.0.0.1:7890").is_ok());
     }
 }

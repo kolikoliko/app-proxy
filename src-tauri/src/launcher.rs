@@ -70,26 +70,22 @@ pub fn create_desktop_launcher(
     app: &AppHandle,
     rule: &AppRule,
     proxy_url: &str,
+    launcher_suffix: &str,
 ) -> Result<LauncherResult, String> {
     let files = write_launcher_files(app, rule, proxy_url)?;
     let desktop = app
         .path()
         .desktop_dir()
         .map_err(|error| format!("无法确定桌面目录：{error}"))?;
-    let shortcut = desktop.join(format!(
-        "{} - 应用代理.lnk",
-        sanitize_shortcut_name(&rule.display_name)
-    ));
+    let shortcut_name = shortcut_name(&rule.display_name, launcher_suffix);
+    let shortcut = desktop.join(format!("{shortcut_name}.lnk"));
     create_launcher_shortcut(
         rule,
         proxy_url,
         &files,
         shortcut,
         "桌面",
-        format!(
-            "已创建“{} - 应用代理”桌面启动器；关闭应用代理后仍可使用",
-            rule.display_name
-        ),
+        format!("已创建“{shortcut_name}”桌面启动器；关闭应用代理后仍可使用"),
     )
 }
 
@@ -97,10 +93,12 @@ pub fn create_start_menu_launcher(
     app: &AppHandle,
     rule: &AppRule,
     proxy_url: &str,
+    launcher_suffix: &str,
 ) -> Result<LauncherResult, String> {
     let files = write_launcher_files(app, rule, proxy_url)?;
     let programs = start_menu_programs_directory(app)?;
-    let shortcut = start_menu_shortcut_path(&programs, &rule.display_name);
+    let shortcut_name = shortcut_name(&rule.display_name, launcher_suffix);
+    let shortcut = start_menu_shortcut_path(&programs, &rule.display_name, launcher_suffix);
     if let Some(parent) = shortcut.parent() {
         fs::create_dir_all(parent).map_err(|error| format!("无法创建开始菜单目录：{error}"))?;
     }
@@ -111,8 +109,7 @@ pub fn create_start_menu_launcher(
         shortcut,
         "开始菜单",
         format!(
-            "已添加“{} - 应用代理”至开始菜单的“所有应用”；可在开始菜单中右键选择“固定到开始屏幕”",
-            rule.display_name
+            "已添加“{shortcut_name}”至开始菜单的“所有应用”；可在开始菜单中右键选择“固定到开始屏幕”"
         ),
     )
 }
@@ -184,10 +181,10 @@ fn start_menu_programs_directory(_app: &AppHandle) -> Result<PathBuf, String> {
     Err("开始菜单启动器当前仅支持 Windows".into())
 }
 
-fn start_menu_shortcut_path(programs: &Path, display_name: &str) -> PathBuf {
+fn start_menu_shortcut_path(programs: &Path, display_name: &str, launcher_suffix: &str) -> PathBuf {
     programs.join("应用代理").join(format!(
-        "{} - 应用代理.lnk",
-        sanitize_shortcut_name(display_name)
+        "{}.lnk",
+        shortcut_name(display_name, launcher_suffix)
     ))
 }
 
@@ -300,8 +297,8 @@ fn powershell_command() -> Command {
 fn validate_launcher_proxy(value: &str) -> Result<url::Url, String> {
     let parsed = url::Url::parse(value)
         .map_err(|_| "代理地址格式无效，请使用 socks://主机:端口 或 http://主机:端口")?;
-    if !matches!(parsed.scheme(), "socks" | "socks5" | "http") {
-        return Err("环境启动器仅支持 SOCKS5 和 HTTP 代理".into());
+    if !matches!(parsed.scheme(), "socks" | "socks5" | "http" | "https") {
+        return Err("环境启动器仅支持 SOCKS、HTTP 和 HTTPS 代理".into());
     }
     if parsed.host_str().is_none() || parsed.port_or_known_default().is_none() {
         return Err("代理地址必须包含有效的主机和端口".into());
@@ -398,6 +395,10 @@ fn sanitize_shortcut_name(value: &str) -> String {
     } else {
         trimmed.chars().take(80).collect()
     }
+}
+
+fn shortcut_name(display_name: &str, launcher_suffix: &str) -> String {
+    sanitize_shortcut_name(&format!("{display_name}{launcher_suffix}"))
 }
 
 fn write_utf8_bom(path: &Path, content: &str) -> Result<(), String> {
@@ -546,7 +547,7 @@ try {
 mod tests {
     use super::{
         is_chromium_like, normalized_launcher_executable, powershell_command,
-        sanitize_shortcut_name, shortcut_icon_path, start_menu_shortcut_path,
+        sanitize_shortcut_name, shortcut_icon_path, shortcut_name, start_menu_shortcut_path,
         validate_launcher_proxy, write_utf8_bom, LauncherFiles, RUNTIME_SCRIPT, SHORTCUT_SCRIPT,
     };
     use crate::store::AppRule;
@@ -562,7 +563,6 @@ mod tests {
             application_id: None,
             executable_scope_root: None,
             scope_executable_count: 0,
-            enabled: true,
             pinned: true,
             created_at: "0".into(),
             updated_at: "0".into(),
@@ -583,7 +583,7 @@ mod tests {
     fn validates_safe_local_proxy_urls() {
         assert!(validate_launcher_proxy("socks://127.0.0.1:7890").is_ok());
         assert!(validate_launcher_proxy("http://127.0.0.1:7890").is_ok());
-        assert!(validate_launcher_proxy("https://127.0.0.1:7890").is_err());
+        assert!(validate_launcher_proxy("https://127.0.0.1:7890").is_ok());
         assert!(validate_launcher_proxy("socks://user:secret@127.0.0.1:7890").is_err());
     }
 
@@ -594,12 +594,18 @@ mod tests {
     }
 
     #[test]
+    fn appends_configured_shortcut_suffix() {
+        assert_eq!(shortcut_name("ChatGPT", "-proxy"), "ChatGPT-proxy");
+        assert_eq!(shortcut_name("Chat:GPT", "-work"), "Chat_GPT-work");
+    }
+
+    #[test]
     fn places_start_menu_launcher_in_app_proxy_folder() {
         let programs =
             PathBuf::from(r"C:\Users\User\AppData\Roaming\Microsoft\Windows\Start Menu\Programs");
         assert_eq!(
-            start_menu_shortcut_path(&programs, "ChatGPT"),
-            programs.join("应用代理").join("ChatGPT - 应用代理.lnk")
+            start_menu_shortcut_path(&programs, "ChatGPT", "-proxy"),
+            programs.join("应用代理").join("ChatGPT-proxy.lnk")
         );
     }
 
@@ -710,7 +716,7 @@ if ($errors.Count -gt 0) {
         std::fs::create_dir_all(&directory).unwrap();
         let helper = directory.join("Create-Shortcut.ps1");
         let command = directory.join("Launch-With-Proxy.cmd");
-        let shortcut = directory.join("Test - 应用代理.lnk");
+        let shortcut = directory.join("Test-proxy.lnk");
         write_utf8_bom(&helper, SHORTCUT_SCRIPT).unwrap();
         std::fs::write(&command, b"@echo off\r\n").unwrap();
 

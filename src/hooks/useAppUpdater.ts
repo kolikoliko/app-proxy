@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
-import { isTauriRuntime, prepareForUpdate, resumeAfterUpdateFailure, testProxy } from "../lib/bridge";
+import { isTauriRuntime, testProxy } from "../lib/bridge";
 import { createExclusiveRunner, createProgressScheduler } from "../lib/asyncControl";
 
 const FALLBACK_VERSION = "0.3.2";
@@ -75,16 +75,16 @@ export function useAppUpdater(proxyUrl: string, ready: boolean): AppUpdater {
         }
         progressScheduler.current?.(100);
       }, { timeout: 5 * 60_000 });
-      safeSetState((current) => ({ ...current, phase: "downloaded", progress: 100, message: "更新包下载并验签完成。安装时会暂时关闭 TUN，然后重启应用。" }));
+      safeSetState((current) => ({ ...current, phase: "downloaded", progress: 100, message: "更新包下载并验签完成，可以安装并重启应用。" }));
     } catch (reason) { safeSetState((current) => ({ ...current, phase: "error", message: errorMessage(reason, pendingConnection.current) })); }
   }), [runExclusive, safeSetState]);
 
   const installUpdate = useCallback(() => runExclusive(async () => {
     const update = pendingUpdate.current;
     if (!update) return;
-    safeSetState((current) => ({ ...current, phase: "installing", message: "正在安全停止 TUN 并启动安装程序…" }));
-    try { await prepareForUpdate(); await update.install(); const { relaunch } = await import("@tauri-apps/plugin-process"); await relaunch(); }
-    catch (reason) { await resumeAfterUpdateFailure().catch(() => undefined); safeSetState((current) => ({ ...current, phase: "error", message: `更新安装失败：${reason instanceof Error ? reason.message : String(reason)}。TUN 已尝试恢复。` })); }
+    safeSetState((current) => ({ ...current, phase: "installing", message: "正在启动安装程序…" }));
+    try { await update.install(); const { relaunch } = await import("@tauri-apps/plugin-process"); await relaunch(); }
+    catch (reason) { safeSetState((current) => ({ ...current, phase: "error", message: `更新安装失败：${reason instanceof Error ? reason.message : String(reason)}。` })); }
   }), [runExclusive, safeSetState]);
 
   useEffect(() => {

@@ -11,39 +11,34 @@ use uuid::Uuid;
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub proxy_url: String,
-    #[serde(default, alias = "globalEnabled")]
-    pub tun_enabled: bool,
+    #[serde(default = "default_launcher_suffix")]
+    pub launcher_suffix: String,
     pub theme: String,
     #[serde(default = "default_accent_color")]
     pub accent_color: String,
     pub launch_at_login: bool,
     pub start_minimized: bool,
-    pub bypass_lan: bool,
-    pub additional_bypass_cidrs: Vec<String>,
-    pub exit_behavior: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pause_until: Option<String>,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            proxy_url: "socks://127.0.0.1:7890".into(),
-            tun_enabled: false,
+            proxy_url: "http://127.0.0.1:7890".into(),
+            launcher_suffix: default_launcher_suffix(),
             theme: "system".into(),
             accent_color: default_accent_color(),
             launch_at_login: false,
             start_minimized: true,
-            bypass_lan: true,
-            additional_bypass_cidrs: Vec::new(),
-            exit_behavior: "restore_direct".into(),
-            pause_until: None,
         }
     }
 }
 
 fn default_accent_color() -> String {
     "blue".into()
+}
+
+fn default_launcher_suffix() -> String {
+    "-proxy".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,7 +56,6 @@ pub struct AppRule {
     pub executable_scope_root: Option<String>,
     #[serde(default)]
     pub scope_executable_count: usize,
-    pub enabled: bool,
     pub pinned: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -167,8 +161,6 @@ impl AppStore {
             if let Some(existing) = state.rules.iter_mut().find(|rule| {
                 rule.executable_path.eq_ignore_ascii_case(&path_string) || same_package_app(rule)
             }) {
-                let executable_unchanged =
-                    existing.executable_path.eq_ignore_ascii_case(&path_string);
                 existing.display_name = display_name.clone();
                 existing.executable_path = path_string.clone();
                 existing.executable_name = executable_name.clone();
@@ -176,11 +168,6 @@ impl AppStore {
                 existing.application_id = application_id.map(str::to_string);
                 existing.executable_scope_root = executable_scope_root.map(str::to_string);
                 existing.scope_executable_count = scope_executable_count;
-                // A Store update changes the versioned WindowsApps path. Preserve
-                // the user's switch while repairing that path.
-                if executable_unchanged {
-                    existing.enabled = true;
-                }
                 existing.updated_at = now.clone();
                 return;
             }
@@ -195,7 +182,6 @@ impl AppStore {
                     application_id: application_id.map(str::to_string),
                     executable_scope_root: executable_scope_root.map(str::to_string),
                     scope_executable_count,
-                    enabled: true,
                     pinned: true,
                     created_at: now.clone(),
                     updated_at: now,
@@ -234,7 +220,7 @@ mod tests {
     use super::{AppRule, AppSettings};
 
     #[test]
-    fn old_settings_migrate_global_switch_and_blue_accent() {
+    fn old_settings_ignore_removed_network_fields() {
         let raw = r#"{
             "proxyUrl":"socks://127.0.0.1:7890",
             "globalEnabled":true,
@@ -247,7 +233,7 @@ mod tests {
         }"#;
         let settings: AppSettings = serde_json::from_str(raw).expect("legacy settings");
         assert_eq!(settings.accent_color, "blue");
-        assert!(settings.tun_enabled);
+        assert_eq!(settings.launcher_suffix, "-proxy");
     }
 
     #[test]

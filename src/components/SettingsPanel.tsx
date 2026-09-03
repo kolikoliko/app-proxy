@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Clock3, LoaderCircle, Palette, ShieldCheck } from "lucide-react";
-import type { AccentColor, AppSettings, ProxyTestResult, TunStatus } from "../types";
+import { CheckCircle2, LoaderCircle, Palette, ShieldCheck } from "lucide-react";
+import type { AccentColor, AppSettings, ProxyTestResult } from "../types";
 import type { AppUpdater } from "../hooks/useAppUpdater";
 import { Switch } from "./Switch";
 import { UpdatePanel } from "./UpdatePanel";
@@ -14,62 +14,103 @@ const ACCENT_OPTIONS: ReadonlyArray<{ value: AccentColor; label: string; color: 
   { value: "cyan", label: "青色", color: "#07838f" },
 ];
 
+type ProxyProtocol = "socks" | "http" | "https";
+
+const PROXY_PROTOCOLS: ReadonlyArray<{ value: ProxyProtocol; label: string }> = [
+  { value: "socks", label: "SOCKS" },
+  { value: "http", label: "HTTP" },
+  { value: "https", label: "HTTPS" },
+];
+
+function splitProxyUrl(value: string): { protocol: ProxyProtocol; endpoint: string } {
+  const match = value.match(/^([a-z][a-z\d+.-]*):\/\/(.*)$/i);
+  const scheme = match?.[1].toLocaleLowerCase();
+  const protocol = scheme === "socks" || scheme === "socks5"
+    ? "socks"
+    : scheme === "https"
+      ? "https"
+      : "http";
+  return { protocol, endpoint: match?.[2] ?? value };
+}
+
 type SettingsPanelProps = {
   settings: AppSettings;
   testing: boolean;
   testResult: ProxyTestResult | null;
-  tunStatus: TunStatus;
   updater: AppUpdater;
   onChange: (patch: Partial<AppSettings>) => void;
   onProxyCommit: (proxyUrl: string) => void;
   onTest: (proxyUrl: string) => void;
-  onPause: (minutes: number | null) => void;
 };
 
-export function SettingsPanel({ settings, testing, testResult, tunStatus, updater, onChange, onProxyCommit, onTest, onPause }: SettingsPanelProps) {
-  const paused = Boolean(settings.pauseUntil);
-  const [proxyDraft, setProxyDraft] = useState(settings.proxyUrl);
+export function SettingsPanel({ settings, testing, testResult, updater, onChange, onProxyCommit, onTest }: SettingsPanelProps) {
+  const initialProxy = splitProxyUrl(settings.proxyUrl);
+  const [proxyProtocol, setProxyProtocol] = useState<ProxyProtocol>(initialProxy.protocol);
+  const [proxyEndpoint, setProxyEndpoint] = useState(initialProxy.endpoint);
+  const [launcherSuffixDraft, setLauncherSuffixDraft] = useState(settings.launcherSuffix);
+  const proxyDraft = `${proxyProtocol}://${proxyEndpoint}`;
+  const selectedAccent = ACCENT_OPTIONS.find((option) => option.value === (settings.accentColor ?? "blue"))
+    ?? ACCENT_OPTIONS[1];
 
-  useEffect(() => setProxyDraft(settings.proxyUrl), [settings.proxyUrl]);
+  useEffect(() => {
+    const next = splitProxyUrl(settings.proxyUrl);
+    setProxyProtocol(next.protocol);
+    setProxyEndpoint(next.endpoint);
+  }, [settings.proxyUrl]);
+
+  useEffect(() => setLauncherSuffixDraft(settings.launcherSuffix), [settings.launcherSuffix]);
+
+  const commitLauncherSuffix = () => {
+    const launcherSuffix = launcherSuffixDraft.trim();
+    setLauncherSuffixDraft(launcherSuffix);
+    if (launcherSuffix !== settings.launcherSuffix) onChange({ launcherSuffix });
+  };
 
   return (
     <aside className="settings-panel">
       <section className="settings-group">
-        <h2 className="settings-group__title"><Palette size={16} />主题色</h2>
-        <p className="settings-group__description">应用到按钮、开关、状态和选中项。</p>
-        <div className="accent-picker" role="group" aria-label="主题色">
-          {ACCENT_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className="accent-option"
-              data-selected={(settings.accentColor ?? "blue") === option.value}
-              aria-pressed={(settings.accentColor ?? "blue") === option.value}
-              aria-label={`${option.label}主题色`}
-              onClick={() => onChange({ accentColor: option.value })}
-            >
-              <span className="accent-option__swatch" style={{ backgroundColor: option.color }} />
-              <span>{option.label}</span>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className="settings-group">
         <h2>代理地址</h2>
-        <label className="field">
-          <span className="sr-only">代理地址</span>
-          <input
-            value={proxyDraft}
-            spellCheck={false}
-            onChange={(event) => setProxyDraft(event.target.value)}
-            onBlur={() => onProxyCommit(proxyDraft)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") onProxyCommit(proxyDraft);
-            }}
-            placeholder="socks://127.0.0.1:7890"
-          />
-        </label>
+        <div className="proxy-address-field">
+          <label className="field">
+            <span className="sr-only">代理协议</span>
+            <select
+              aria-label="代理协议"
+              value={proxyProtocol}
+              onChange={(event) => {
+                const protocol = event.target.value as ProxyProtocol;
+                setProxyProtocol(protocol);
+                onProxyCommit(`${protocol}://${proxyEndpoint}`);
+              }}
+            >
+              {PROXY_PROTOCOLS.map((protocol) => (
+                <option key={protocol.value} value={protocol.value}>{protocol.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span className="sr-only">代理主机和端口</span>
+            <input
+              aria-label="代理主机和端口"
+              value={proxyEndpoint}
+              spellCheck={false}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (/^[a-z][a-z\d+.-]*:\/\//i.test(value)) {
+                  const next = splitProxyUrl(value);
+                  setProxyProtocol(next.protocol);
+                  setProxyEndpoint(next.endpoint);
+                } else {
+                  setProxyEndpoint(value);
+                }
+              }}
+              onBlur={() => onProxyCommit(proxyDraft)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") onProxyCommit(proxyDraft);
+              }}
+              placeholder="127.0.0.1:7890"
+            />
+          </label>
+        </div>
         <button type="button" className="button button--test" disabled={testing} onClick={() => onTest(proxyDraft)}>
           {testing ? <LoaderCircle className="spin" size={17} /> : <ShieldCheck size={17} />}
           {testing ? "正在测试" : "测试连接"}
@@ -81,62 +122,58 @@ export function SettingsPanel({ settings, testing, testResult, tunStatus, update
             {testResult.latencyMs ? <strong>{testResult.latencyMs} ms</strong> : null}
           </div>
         ) : null}
-        {tunStatus.protocolNote ? <p className="hint">{tunStatus.protocolNote}</p> : null}
         <div className="proxy-mode-notice proxy-mode-notice--compatible" role="note">
           <ShieldCheck size={17} />
           <span>
-            <strong>Clash / Mihomo 支持规则和全局模式</strong>
-            TUN 会恢复 HTTP、TLS 和 QUIC 目标域名供上游匹配。若仍被自定义规则判定为 DIRECT，可切换全局模式排查。
+            <strong>支持 SOCKS、HTTP 和 HTTPS 本地代理</strong>
+            应用启动器会设置代理环境变量；Chromium/Electron 应用还会自动附加代理启动参数。
           </span>
         </div>
       </section>
 
-      <section className="settings-group">
-        <h2>定时暂停</h2>
-        <div className="pause-control">
-          <Clock3 size={17} />
-          <select
-            value={paused ? "paused" : "running"}
-            onChange={(event) => {
-              const value = event.target.value;
-              if (value === "running") onPause(0);
-              else if (value === "manual") onPause(null);
-              else onPause(Number(value));
-            }}
-          >
-            <option value="running">不暂停</option>
-            <option value="5">暂停 5 分钟</option>
-            <option value="15">暂停 15 分钟</option>
-            <option value="30">暂停 30 分钟</option>
-            <option value="60">暂停 1 小时</option>
-            <option value="manual">直到手动恢复</option>
-            {paused ? <option value="paused">暂停中</option> : null}
-          </select>
-        </div>
-        {paused ? <p className="hint">已暂停。选择“不暂停”可立即恢复。</p> : null}
-      </section>
-
       <section className="settings-group settings-group--rows">
-        <SettingRow label="TUN 模式" description={tunStatus.message}>
-          <Switch
-            checked={settings.tunEnabled}
-            onChange={(tunEnabled) => onChange({ tunEnabled, pauseUntil: undefined })}
-            label="TUN 模式"
-          />
-        </SettingRow>
-        <SettingRow label="局域网绕过" description="NAS、打印机与内网地址直连">
-          <Switch checked={settings.bypassLan} onChange={(bypassLan) => onChange({ bypassLan })} label="局域网绕过" />
-        </SettingRow>
+        <div className="setting-row setting-row--accent">
+          <span>
+            <strong className="setting-label-with-icon"><Palette size={16} />主题色</strong>
+            <small>应用到按钮、开关、状态和选中项</small>
+          </span>
+          <label className="field setting-select-field accent-select-field">
+            <span className="accent-select-field__swatch" style={{ backgroundColor: selectedAccent.color }} />
+            <select
+              aria-label="主题色"
+              value={selectedAccent.value}
+              onChange={(event) => onChange({ accentColor: event.target.value as AccentColor })}
+            >
+              {ACCENT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="setting-row setting-row--field">
+          <span>
+            <strong>快捷方式后缀</strong>
+            <small>应用到新建的桌面和开始菜单快捷方式</small>
+            <small className="shortcut-name-preview">示例：Chrome{launcherSuffixDraft.trim()}.lnk</small>
+          </span>
+          <label className="field shortcut-suffix-field">
+            <span className="sr-only">快捷方式后缀</span>
+            <input
+              aria-label="快捷方式后缀"
+              value={launcherSuffixDraft}
+              maxLength={40}
+              spellCheck={false}
+              onChange={(event) => setLauncherSuffixDraft(event.target.value.replace(/[<>:"/\\|?*]/g, ""))}
+              onBlur={commitLauncherSuffix}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") commitLauncherSuffix();
+              }}
+              placeholder="-proxy"
+            />
+          </label>
+        </div>
         <SettingRow label="开机自启" description="登录后静默启动到托盘">
           <Switch checked={settings.launchAtLogin} onChange={(launchAtLogin) => onChange({ launchAtLogin })} label="开机自启" />
-        </SettingRow>
-        <SettingRow label="退出安全保护" description="当前版本始终清理临时路由和 TUN">
-          <Switch
-            checked
-            disabled
-            onChange={() => undefined}
-            label="退出安全保护"
-          />
         </SettingRow>
       </section>
 

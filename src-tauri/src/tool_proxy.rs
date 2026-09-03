@@ -82,8 +82,8 @@ pub fn clear_git_proxy(app_proxy_url: &str) -> Result<GitProxyStatus, String> {
 
 fn git_proxy_url(value: &str) -> Result<String, String> {
     let mut parsed = url::Url::parse(value).map_err(|_| "代理地址格式无效".to_string())?;
-    if !matches!(parsed.scheme(), "socks" | "socks5" | "http") {
-        return Err("Git 代理仅支持 SOCKS5 和 HTTP".into());
+    if !matches!(parsed.scheme(), "socks" | "socks5" | "http" | "https") {
+        return Err("Git 代理仅支持 SOCKS、HTTP 和 HTTPS".into());
     }
     if parsed.host_str().is_none() || parsed.port_or_known_default().is_none() {
         return Err("代理地址必须包含有效的主机和端口".into());
@@ -214,6 +214,14 @@ mod tests {
         assert_eq!(
             git_proxy_url("http://127.0.0.1:7890").unwrap(),
             "http://127.0.0.1:7890"
+        );
+    }
+
+    #[test]
+    fn keeps_https_proxy_url_for_git() {
+        assert_eq!(
+            git_proxy_url("https://127.0.0.1:7890").unwrap(),
+            "https://127.0.0.1:7890"
         );
     }
 
