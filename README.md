@@ -2,6 +2,10 @@
 
 一个轻量、开源的 Windows 应用代理启动器。通过本地 SOCKS、HTTP 或 HTTPS 代理按需启动应用，不修改系统代理。
 
+![应用代理主界面](docs/images/app-proxy-main-window.png)
+
+> 为单个 Windows 应用按需启用代理，并集中管理应用、快捷方式与工具代理。
+
 ## 功能
 
 - 从已安装的 Win32 和 Microsoft Store 应用中搜索并添加程序。

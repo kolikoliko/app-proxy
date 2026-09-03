@@ -163,14 +163,81 @@ mod windows_impl {
                 bgra.len() * mem::size_of::<u32>(),
             )
         };
-        let rgba: Vec<u8> = bytes
+        let mut rgba: Vec<u8> = bytes
             .chunks_exact(4)
             .flat_map(|pixel| [pixel[2], pixel[1], pixel[0], pixel[3]])
             .collect();
         if rgba.chunks_exact(4).all(|pixel| pixel[3] == 0) {
-            return Err("图标透明通道为空".into());
+            // 一些 Electron 程序的图标颜色位图没有写入 alpha，透明区域只保存在
+            // Windows 的 AND 蒙版中。此时用蒙版恢复透明度，避免把可用图标误判为空。
+            restore_alpha_from_mask(icon_info.hbmMask, width, height, &mut rgba)?;
         }
         Ok((width, height, rgba))
+    }
+
+    fn restore_alpha_from_mask(
+        mask: HBITMAP,
+        width: u32,
+        height: u32,
+        rgba: &mut [u8],
+    ) -> Result<(), String> {
+        if mask.0.is_null() {
+            return Err("图标透明通道为空，且没有可读取的透明蒙版".into());
+        }
+        let pixel_count = usize::try_from(width)
+            .ok()
+            .and_then(|value| value.checked_mul(height as usize))
+            .ok_or("图标蒙版尺寸溢出")?;
+        let mut mask_pixels = vec![0u32; pixel_count];
+        let dc = OwnedDc(unsafe { GetDC(None) });
+        if dc.0 .0.is_null() {
+            return Err("无法创建图标蒙版绘制上下文".into());
+        }
+        let mut bitmap_info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width as i32,
+                biHeight: -(height as i32),
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            bmiColors: [Default::default()],
+        };
+        let lines = unsafe {
+            GetDIBits(
+                dc.0,
+                mask,
+                0,
+                height,
+                Some(mask_pixels.as_mut_ptr().cast()),
+                &mut bitmap_info,
+                DIB_RGB_COLORS,
+            )
+        };
+        if lines != height as i32 {
+            return Err("无法读取图标透明蒙版".into());
+        }
+
+        let mask_bytes = unsafe {
+            std::slice::from_raw_parts(
+                mask_pixels.as_ptr().cast::<u8>(),
+                mask_pixels.len() * mem::size_of::<u32>(),
+            )
+        };
+        for (pixel, mask_pixel) in rgba.chunks_exact_mut(4).zip(mask_bytes.chunks_exact(4)) {
+            // AND 蒙版中黑色代表不透明，白色代表透明。
+            pixel[3] = if mask_pixel[0..3].iter().any(|channel| *channel != 0) {
+                0
+            } else {
+                255
+            };
+        }
+        if rgba.chunks_exact(4).all(|pixel| pixel[3] == 0) {
+            return Err("图标颜色位图和透明蒙版均为空".into());
+        }
+        Ok(())
     }
 
     #[cfg(test)]
@@ -185,6 +252,20 @@ mod windows_impl {
                 .expect("associated icon");
             assert!(icon.starts_with("data:image/png;base64,"));
             assert!(icon.len() > 100);
+        }
+
+        #[test]
+        fn extracts_icons_requested_for_diagnostics() {
+            let Ok(paths) = std::env::var("APP_PROXY_ICON_TEST_PATHS") else {
+                return;
+            };
+            for path in paths.split(';').filter(|path| !path.is_empty()) {
+                let icon = extract(path)
+                    .unwrap_or_else(|error| panic!("无法提取 {path} 的图标：{error}"))
+                    .unwrap_or_else(|| panic!("{path} 没有可提取的图标"));
+                assert!(icon.starts_with("data:image/png;base64,"));
+                assert!(icon.len() > 100, "{path} 的图标数据异常");
+            }
         }
     }
 }

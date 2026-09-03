@@ -11,7 +11,7 @@ use std::{
     net::{TcpStream, ToSocketAddrs},
     time::{Duration, Instant},
 };
-use store::{AppSettings, AppStore, PersistedState};
+use store::{AppRule, AppSettings, AppStore, PersistedState};
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
@@ -132,6 +132,90 @@ fn refresh_package_rule_scopes(store: &AppStore) -> Result<PersistedState, Strin
             if changed {
                 rule.updated_at = store::now_string();
             }
+        }
+    })
+}
+
+fn normalized_product_name(display_name: &str) -> String {
+    let mut parts: Vec<&str> = display_name.split_whitespace().collect();
+    while parts.last().is_some_and(|part| {
+        let version = part.trim_start_matches(['v', 'V']);
+        version.chars().any(|character| character.is_ascii_digit())
+            && version.contains('.')
+            && version
+                .chars()
+                .all(|character| character.is_ascii_digit() || matches!(character, '.' | '-' | '_'))
+    }) {
+        parts.pop();
+    }
+    parts.join(" ").to_lowercase()
+}
+
+fn desktop_refresh_candidate<'a>(
+    rule: &AppRule,
+    installed: &'a [InstalledApp],
+) -> Option<&'a InstalledApp> {
+    installed
+        .iter()
+        .find(|app| {
+            app.executable_path
+                .eq_ignore_ascii_case(&rule.executable_path)
+        })
+        .or_else(|| {
+            let expected_product = normalized_product_name(&rule.display_name);
+            let mut matches = installed.iter().filter(|app| {
+                app.executable_name
+                    .eq_ignore_ascii_case(&rule.executable_name)
+                    && normalized_product_name(&app.display_name) == expected_product
+            });
+            let first = matches.next()?;
+            matches.next().is_none().then_some(first)
+        })
+}
+
+fn refresh_desktop_rule_metadata(store: &AppStore) -> Result<PersistedState, String> {
+    let current = store.load()?;
+    let installed = installed_apps::discover_installed_apps();
+    let resolutions: Vec<_> = current
+        .rules
+        .iter()
+        .filter(|rule| rule.package_family_name.is_none())
+        .filter_map(|rule| {
+            let candidate = desktop_refresh_candidate(rule, &installed)?;
+
+            let same_product = normalized_product_name(&candidate.display_name)
+                == normalized_product_name(&rule.display_name);
+            Some((
+                rule.id.clone(),
+                candidate.executable_path.clone(),
+                candidate.executable_name.clone(),
+                same_product.then(|| candidate.display_name.clone()),
+            ))
+        })
+        .collect();
+    if resolutions.is_empty() {
+        return Ok(current);
+    }
+
+    store.update(move |state| {
+        for (id, executable_path, executable_name, display_name) in resolutions {
+            let Some(rule) = state.rules.iter_mut().find(|rule| rule.id == id) else {
+                continue;
+            };
+            let changed = !rule.executable_path.eq_ignore_ascii_case(&executable_path)
+                || !rule.executable_name.eq_ignore_ascii_case(&executable_name)
+                || display_name
+                    .as_deref()
+                    .is_some_and(|name| name != rule.display_name);
+            if !changed {
+                continue;
+            }
+            rule.executable_path = executable_path;
+            rule.executable_name = executable_name;
+            if let Some(display_name) = display_name {
+                rule.display_name = display_name;
+            }
+            rule.updated_at = store::now_string();
         }
     })
 }
@@ -288,28 +372,18 @@ fn validate_proxy_url(value: &str) -> Result<url::Url, String> {
 }
 
 fn tray_icon() -> Image<'static> {
-    let size = 32usize;
-    let mut rgba = vec![0u8; size * size * 4];
-    for y in 0..size {
-        for x in 0..size {
-            let dx = x as isize - 16;
-            let dy = y as isize - 16;
-            let inside = dx * dx + dy * dy <= 12 * 12;
-            let index = (y * size + x) * 4;
-            if inside {
-                rgba[index] = 21;
-                rgba[index + 1] = 147;
-                rgba[index + 2] = 61;
-                rgba[index + 3] = 255;
-            }
-            if inside && (dx.abs() <= 2 || dy.abs() <= 2) {
-                rgba[index] = 255;
-                rgba[index + 1] = 255;
-                rgba[index + 2] = 255;
-            }
-        }
-    }
-    Image::new_owned(rgba, size as u32, size as u32)
+    let decoder = png::Decoder::new(std::io::Cursor::new(include_bytes!(
+        "../icons/tray-icon.png"
+    )));
+    let mut reader = decoder.read_info().expect("内置托盘图标必须是有效的 PNG");
+    let mut rgba = vec![0; reader.output_buffer_size()];
+    let info = reader
+        .next_frame(&mut rgba)
+        .expect("必须能够读取内置托盘图标");
+    assert_eq!(info.color_type, png::ColorType::Rgba);
+    assert_eq!(info.bit_depth, png::BitDepth::Eight);
+    rgba.truncate(info.buffer_size());
+    Image::new_owned(rgba, info.width, info.height)
 }
 
 fn build_tray_menu(
@@ -364,6 +438,7 @@ pub fn run() {
             let store = AppStore::new(config_dir);
             store.ensure().map_err(std::io::Error::other)?;
             refresh_package_rule_scopes(&store).map_err(std::io::Error::other)?;
+            refresh_desktop_rule_metadata(&store).map_err(std::io::Error::other)?;
             let initial_state = store.load().map_err(std::io::Error::other)?;
             app.manage(store);
             let menu = build_tray_menu(app.handle(), &initial_state)?;
@@ -426,7 +501,57 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_proxy_url;
+    use super::{
+        desktop_refresh_candidate, normalized_product_name, tray_icon, validate_proxy_url,
+    };
+    use crate::{installed_apps::InstalledApp, store::AppRule};
+
+    #[test]
+    fn removes_version_suffix_from_product_name() {
+        assert_eq!(normalized_product_name("Multica 0.4.17"), "multica");
+        assert_eq!(normalized_product_name("Antigravity v2.2.1"), "antigravity");
+        assert_eq!(normalized_product_name("Microsoft Edge"), "microsoft edge");
+    }
+
+    #[test]
+    fn finds_updated_versioned_executable_by_product_and_file_name() {
+        let rule = AppRule {
+            id: "edge".into(),
+            display_name: "Microsoft Edge".into(),
+            executable_path: r"C:\Program Files (x86)\Microsoft\Edge\Application\150\msedge.exe"
+                .into(),
+            executable_name: "msedge.exe".into(),
+            package_family_name: None,
+            application_id: None,
+            executable_scope_root: None,
+            scope_executable_count: 0,
+            pinned: true,
+            created_at: "1".into(),
+            updated_at: "1".into(),
+        };
+        let installed = vec![InstalledApp {
+            display_name: "Microsoft Edge".into(),
+            executable_path: r"C:\Program Files (x86)\Microsoft\Edge\Application\152\msedge.exe"
+                .into(),
+            executable_name: "msedge.exe".into(),
+            source: "registry-uninstall".into(),
+            package_family_name: None,
+            application_id: None,
+        }];
+
+        let candidate = desktop_refresh_candidate(&rule, &installed).expect("updated Edge path");
+        assert!(candidate.executable_path.contains(r"\152\"));
+    }
+
+    #[test]
+    fn tray_uses_the_bundled_blue_application_icon() {
+        let icon = tray_icon();
+        assert_eq!((icon.width(), icon.height()), (32, 32));
+        assert!(icon
+            .rgba()
+            .chunks_exact(4)
+            .any(|pixel| pixel[2] > 180 && pixel[0] < 80));
+    }
 
     #[test]
     fn rejects_proxy_userinfo_without_echoing_credentials() {
