@@ -65,3 +65,11 @@ export type LauncherResult = {
   shortcutPath?: string;
   chromiumMode: boolean;
 };
+
+export type GitProxyStatus = {
+  installed: boolean;
+  version?: string;
+  httpProxies: string[];
+  httpsProxies: string[];
+  matchesAppProxy: boolean;
+};

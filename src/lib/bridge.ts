@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { DEFAULT_STATE } from "./defaults";
-import type { AppRule, AppSettings, InstalledApp, LauncherResult, PersistedState, ProxyTestResult, TunStatus } from "../types";
+import type { AppRule, AppSettings, GitProxyStatus, InstalledApp, LauncherResult, PersistedState, ProxyTestResult, TunStatus } from "../types";
 
 const STORAGE_KEY = "app-proxy-state-v1";
 
@@ -223,6 +223,47 @@ export async function testProxy(proxyUrl: string): Promise<ProxyTestResult> {
   if (isTauriRuntime()) return invoke<ProxyTestResult>("test_proxy", { proxyUrl });
   await new Promise((resolve) => window.setTimeout(resolve, 420));
   return { reachable: true, latencyMs: 18, message: "本地端口可连接" };
+}
+
+const BROWSER_GIT_PROXY_KEY = "app-proxy-browser-git-proxy";
+
+function browserGitProxyUrl() {
+  const parsed = new URL(readBrowserState().settings.proxyUrl);
+  if (parsed.protocol === "socks:" || parsed.protocol === "socks5:") parsed.protocol = "socks5h:";
+  return parsed.toString().replace(/\/$/, "");
+}
+
+function browserGitProxyStatus(configuredProxy?: string | null): GitProxyStatus {
+  const targetProxy = browserGitProxyUrl();
+  const matchesAppProxy = configuredProxy === targetProxy;
+  return {
+    installed: true,
+    version: "2.54.0.windows.1",
+    httpProxies: configuredProxy ? [configuredProxy] : [],
+    httpsProxies: configuredProxy ? [configuredProxy] : [],
+    matchesAppProxy,
+  };
+}
+
+export async function getGitProxyStatus(): Promise<GitProxyStatus> {
+  if (isTauriRuntime()) return invoke<GitProxyStatus>("get_git_proxy_status");
+  await new Promise((resolve) => window.setTimeout(resolve, 240));
+  return browserGitProxyStatus(localStorage.getItem(BROWSER_GIT_PROXY_KEY));
+}
+
+export async function applyGitProxy(): Promise<GitProxyStatus> {
+  if (isTauriRuntime()) return invoke<GitProxyStatus>("apply_git_proxy");
+  await new Promise((resolve) => window.setTimeout(resolve, 360));
+  const proxyUrl = browserGitProxyUrl();
+  localStorage.setItem(BROWSER_GIT_PROXY_KEY, proxyUrl);
+  return browserGitProxyStatus(proxyUrl);
+}
+
+export async function clearGitProxy(): Promise<GitProxyStatus> {
+  if (isTauriRuntime()) return invoke<GitProxyStatus>("clear_git_proxy");
+  await new Promise((resolve) => window.setTimeout(resolve, 360));
+  localStorage.removeItem(BROWSER_GIT_PROXY_KEY);
+  return browserGitProxyStatus();
 }
 
 function browserTunStatus(state: PersistedState): TunStatus {

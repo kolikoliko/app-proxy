@@ -1,7 +1,7 @@
-import { Box, CircleHelp, Moon, Network, Settings, Stethoscope, Sun } from "lucide-react";
+import { Box, CircleHelp, Moon, Network, Settings, Stethoscope, Sun, Wrench } from "lucide-react";
 import type { ThemeMode } from "../types";
 
-export type NavigationView = "apps" | "settings";
+export type NavigationView = "apps" | "tools" | "settings";
 
 type SidebarProps = {
   theme: ThemeMode;
@@ -13,6 +13,7 @@ type SidebarProps = {
 
 const navigation = [
   { id: "apps", label: "应用代理", icon: Network, enabled: true },
+  { id: "tools", label: "工具代理", icon: Wrench, enabled: true },
   { id: "settings", label: "设置", icon: Settings, enabled: true },
   { id: "diagnostics", label: "诊断", icon: Stethoscope, enabled: false },
   { id: "about", label: "关于", icon: CircleHelp, enabled: false },

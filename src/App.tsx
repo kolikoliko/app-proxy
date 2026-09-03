@@ -5,6 +5,7 @@ import { InstalledAppsDialog } from "./components/InstalledAppsDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { Sidebar, type NavigationView } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
+import { ToolProxyPanel } from "./components/ToolProxyPanel";
 import { addRule, checkTunReady, chooseExecutable, createRuleDesktopLauncher, createRuleStartMenuLauncher, getTunStatus, launchRuleWithProxy, loadState, removeRule, saveSettings, syncAutostart, testProxy, updateRule } from "./lib/bridge";
 import { DEFAULT_STATE } from "./lib/defaults";
 import { createSerialQueue, isLatestRequest, settleSubscription } from "./lib/asyncControl";
@@ -271,6 +272,8 @@ export function App() {
               busyAction={busyAction}
             />
           </>
+        ) : activeView === "tools" ? (
+          <ToolProxyPanel proxyUrl={state.settings.proxyUrl} />
         ) : (
           <section className="settings-page" aria-labelledby="settings-title">
             <header className="page-header">

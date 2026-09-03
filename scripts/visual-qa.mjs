@@ -42,7 +42,7 @@ await page.evaluate(({ now, paths }) => {
 }, { now, paths });
 
 await page.reload({ waitUntil: "networkidle" });
-await page.waitForFunction(() => document.documentElement.dataset.accent === "green");
+await page.waitForFunction(() => document.documentElement.dataset.accent === "blue");
 await page.locator(".app-row img").first().waitFor();
 const renderedMainListIcons = await page.locator(".app-row img").count();
 if (renderedMainListIcons !== paths.length) {
@@ -57,6 +57,7 @@ if (lightIconBackgrounds.some((color) => color !== "rgba(0, 0, 0, 0)")) {
 const screenshotDir = process.env.TEMP ?? process.cwd();
 const appsScreenshot = path.join(screenshotDir, "app-proxy-apps.png");
 const settingsScreenshot = path.join(screenshotDir, "app-proxy-settings.png");
+const toolsScreenshot = path.join(screenshotDir, "app-proxy-tools.png");
 const pickerScreenshot = path.join(screenshotDir, "app-proxy-installed-apps.png");
 await page.screenshot({ path: appsScreenshot, fullPage: true });
 
@@ -94,6 +95,16 @@ await page.locator(".pause-control select").selectOption("5");
 await page.getByText("已暂停。选择“不暂停”可立即恢复。").waitFor();
 await page.locator(".pause-control select").selectOption("running");
 await page.getByText("已暂停。选择“不暂停”可立即恢复。").waitFor({ state: "hidden" });
+
+await page.getByRole("button", { name: "工具代理", exact: true }).click();
+await page.getByRole("heading", { name: "工具代理", exact: true }).waitFor();
+await page.getByText("未配置", { exact: true }).first().waitFor();
+await page.getByRole("button", { name: "应用当前代理", exact: true }).click();
+await page.getByText("已将应用代理写入 Git 全局配置", { exact: true }).waitFor();
+await page.getByText("已同步", { exact: true }).waitFor();
+await page.screenshot({ path: toolsScreenshot, fullPage: true });
+await page.getByRole("button", { name: "清除代理", exact: true }).click();
+await page.getByText("已清除 Git 全局代理配置", { exact: true }).waitFor();
 
 await page.getByRole("button", { name: "应用代理", exact: true }).click();
 
@@ -137,5 +148,5 @@ const compactMetrics = await page.evaluate(() => ({
   workspaceClientWidth: document.querySelector(".workspace")?.clientWidth,
 }));
 
-console.log(JSON.stringify({ metrics, compactMetrics, renderedMainListIcons, lightAccent, darkAccent, lightIconBackgrounds, darkIconBackgrounds, consoleErrors, appsScreenshot, pickerScreenshot, settingsScreenshot }, null, 2));
+console.log(JSON.stringify({ metrics, compactMetrics, renderedMainListIcons, lightAccent, darkAccent, lightIconBackgrounds, darkIconBackgrounds, consoleErrors, appsScreenshot, pickerScreenshot, settingsScreenshot, toolsScreenshot }, null, 2));
 await browser.close();

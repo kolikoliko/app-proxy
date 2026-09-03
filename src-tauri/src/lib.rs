@@ -3,6 +3,7 @@ mod installed_apps;
 mod launcher;
 mod routing;
 mod store;
+mod tool_proxy;
 
 use installed_apps::InstalledApp;
 use launcher::LauncherResult;
@@ -19,6 +20,7 @@ use tauri::{
     tray::TrayIconBuilder,
     Emitter, Manager,
 };
+use tool_proxy::GitProxyStatus;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -373,6 +375,30 @@ async fn test_proxy(proxy_url: String) -> Result<ProxyTestResult, String> {
     .map_err(|error| error.to_string())?
 }
 
+#[tauri::command]
+async fn get_git_proxy_status(store: tauri::State<'_, AppStore>) -> Result<GitProxyStatus, String> {
+    let proxy_url = store.load()?.settings.proxy_url;
+    tauri::async_runtime::spawn_blocking(move || tool_proxy::get_git_proxy_status(&proxy_url))
+        .await
+        .map_err(|error| format!("读取 Git 代理任务失败：{error}"))?
+}
+
+#[tauri::command]
+async fn apply_git_proxy(store: tauri::State<'_, AppStore>) -> Result<GitProxyStatus, String> {
+    let proxy_url = store.load()?.settings.proxy_url;
+    tauri::async_runtime::spawn_blocking(move || tool_proxy::apply_git_proxy(&proxy_url))
+        .await
+        .map_err(|error| format!("设置 Git 代理任务失败：{error}"))?
+}
+
+#[tauri::command]
+async fn clear_git_proxy(store: tauri::State<'_, AppStore>) -> Result<GitProxyStatus, String> {
+    let proxy_url = store.load()?.settings.proxy_url;
+    tauri::async_runtime::spawn_blocking(move || tool_proxy::clear_git_proxy(&proxy_url))
+        .await
+        .map_err(|error| format!("清除 Git 代理任务失败：{error}"))?
+}
+
 fn validate_proxy_url(value: &str) -> Result<url::Url, String> {
     let parsed = url::Url::parse(value)
         .map_err(|_| "代理地址格式无效，请使用 socks://主机:端口 或 http://主机:端口")?;
@@ -545,6 +571,9 @@ pub fn run() {
             create_rule_desktop_launcher,
             create_rule_start_menu_launcher,
             test_proxy,
+            get_git_proxy_status,
+            apply_git_proxy,
+            clear_git_proxy,
             get_tun_status,
             check_tun_ready,
             prepare_for_update,
