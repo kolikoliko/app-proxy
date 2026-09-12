@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { CheckCircle2, X } from "lucide-react";
 import { AppList } from "./components/AppList";
 import { InstalledAppsDialog } from "./components/InstalledAppsDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -53,9 +54,14 @@ export function App() {
   }, [refreshFromBackend]);
 
   useLayoutEffect(() => {
-    const theme = effectiveTheme(state.settings.theme);
-    document.documentElement.dataset.theme = theme;
+    const updateTheme = () => {
+      document.documentElement.dataset.theme = effectiveTheme(state.settings.theme);
+    };
+    updateTheme();
     document.documentElement.dataset.accent = state.settings.accentColor ?? "blue";
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    media.addEventListener("change", updateTheme);
+    return () => media.removeEventListener("change", updateTheme);
   }, [state.settings.theme, state.settings.accentColor]);
 
   const saveSettingsPatch = useCallback(async (patch: Partial<AppSettings>) => {
@@ -175,51 +181,68 @@ export function App() {
         onThemeChange={(theme) => void saveSettingsPatch({ theme })}
       />
       <main className="workspace">
-        {error ? <div className="error-banner" role="alert">{error}</div> : null}
-        {notice ? <div className="success-banner" role="status">{notice}</div> : null}
-        {updater.phase === "available" || updater.phase === "downloaded" ? (
-          <button type="button" className="update-banner" onClick={() => setActiveView("settings")}>
-            <span>发现应用代理 v{updater.availableVersion}，可在设置中下载并安装。</span>
-            <strong>查看更新</strong>
-          </button>
-        ) : null}
-        {activeView === "apps" ? (
-          <>
-            <StatusBar
-              appCount={state.rules.length}
-              proxyUrl={state.settings.proxyUrl}
-            />
-            <AppList
-              rules={state.rules}
-              onAdd={() => setPickerOpen(true)}
-              onRemove={(id) => void applyStateMutation(() => removeRule(id)).catch(() => undefined)}
-              onProxyLaunch={(id) => void handleLauncherAction(id, "launch")}
-              onCreateLauncher={(id) => void handleLauncherAction(id, "shortcut")}
-              onCreateStartMenuLauncher={(id) => void handleLauncherAction(id, "start-menu")}
-              busyAction={busyAction}
-            />
-          </>
-        ) : activeView === "tools" ? (
-          <ToolProxyPanel proxyUrl={state.settings.proxyUrl} />
-        ) : (
-          <section className="settings-page" aria-labelledby="settings-title">
-            <header className="page-header">
-              <h1 id="settings-title">设置</h1>
-              <p>管理代理连接、外观、启动行为和应用更新。</p>
-            </header>
-            <SettingsPanel
-              settings={state.settings}
-              testing={testing}
-              testResult={testResult}
-              updater={updater}
-              onChange={(patch) => void saveSettingsPatch(patch)}
-              onProxyCommit={(proxyUrl) => {
-                if (proxyUrl !== state.settings.proxyUrl) void saveSettingsPatch({ proxyUrl });
-              }}
-              onTest={handleTest}
-            />
-          </section>
-        )}
+        <div className="workspace-topbar">
+          <span>工作空间 <span className="breadcrumb-divider">/</span> <strong>{activeView === "apps" ? "应用代理" : activeView === "tools" ? "工具代理" : "设置"}</strong></span>
+          <span className="workspace-label"><span />本地工作空间</span>
+        </div>
+        <div className="workspace-content">
+          {error ? <div className="error-banner" role="alert">{error}</div> : null}
+          {notice ? <div className="success-banner" role="status">
+            <CheckCircle2 size={18} />
+            <span>{notice}</span>
+            <button type="button" className="icon-button" aria-label="关闭操作提示" onClick={() => setNotice(null)}><X size={16} /></button>
+          </div> : null}
+          {updater.phase === "available" || updater.phase === "downloaded" ? (
+            <button type="button" className="update-banner" onClick={() => setActiveView("settings")}>
+              <span>发现应用代理 v{updater.availableVersion}，可在设置中下载并安装。</span>
+              <strong>查看更新</strong>
+            </button>
+          ) : null}
+          {activeView === "apps" ? (
+            <>
+              <header className="page-header apps-page-header">
+                <span className="page-kicker">YOUR CONNECTIONS, SIMPLIFIED</span>
+                <h1>连接，自在掌控<span className="heading-dot">。</span></h1>
+                <p>为常用应用设置专属代理，让每一次启动都更从容。</p>
+              </header>
+              <StatusBar
+                appCount={state.rules.length}
+                proxyUrl={state.settings.proxyUrl}
+                onOpenSettings={() => setActiveView("settings")}
+              />
+              <AppList
+                rules={state.rules}
+                onAdd={() => setPickerOpen(true)}
+                onRemove={(id) => void applyStateMutation(() => removeRule(id)).catch(() => undefined)}
+                onProxyLaunch={(id) => void handleLauncherAction(id, "launch")}
+                onCreateLauncher={(id) => void handleLauncherAction(id, "shortcut")}
+                onCreateStartMenuLauncher={(id) => void handleLauncherAction(id, "start-menu")}
+                busyAction={busyAction}
+              />
+            </>
+          ) : activeView === "tools" ? (
+            <ToolProxyPanel proxyUrl={state.settings.proxyUrl} />
+          ) : (
+            <section className="settings-page" aria-labelledby="settings-title">
+              <header className="page-header">
+                <span className="page-kicker">MAKE IT YOURS</span>
+                <h1 id="settings-title">设置</h1>
+                <p>管理代理连接、外观、启动行为和应用更新。</p>
+              </header>
+              <SettingsPanel
+                settings={state.settings}
+                testing={testing}
+                testResult={testResult}
+                updater={updater}
+                onChange={(patch) => void saveSettingsPatch(patch)}
+                onProxyCommit={(proxyUrl) => {
+                  if (proxyUrl !== state.settings.proxyUrl) void saveSettingsPatch({ proxyUrl });
+                }}
+                onTest={handleTest}
+              />
+            </section>
+          )}
+        </div>
       </main>
       {pickerOpen ? (
         <InstalledAppsDialog

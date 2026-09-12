@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, LoaderCircle, Palette, ShieldCheck } from "lucide-react";
+import { Check, CheckCircle2, LoaderCircle, Palette, ShieldCheck } from "lucide-react";
 import type { AccentColor, AppSettings, ProxyTestResult } from "../types";
 import type { AppUpdater } from "../hooks/useAppUpdater";
 import { Switch } from "./Switch";
@@ -69,7 +69,8 @@ export function SettingsPanel({ settings, testing, testResult, updater, onChange
   return (
     <aside className="settings-panel">
       <section className="settings-group">
-        <h2>代理地址</h2>
+        <h2 className="settings-group__title"><ShieldCheck size={18} />代理连接</h2>
+        <p className="settings-group__description">设置应用和开发工具使用的本地代理地址。</p>
         <div className="proxy-address-field">
           <label className="field">
             <span className="sr-only">代理协议</span>
@@ -137,18 +138,15 @@ export function SettingsPanel({ settings, testing, testResult, updater, onChange
             <strong className="setting-label-with-icon"><Palette size={16} />主题色</strong>
             <small>应用到按钮、开关、状态和选中项</small>
           </span>
-          <label className="field setting-select-field accent-select-field">
-            <span className="accent-select-field__swatch" style={{ backgroundColor: selectedAccent.color }} />
-            <select
-              aria-label="主题色"
-              value={selectedAccent.value}
-              onChange={(event) => onChange({ accentColor: event.target.value as AccentColor })}
-            >
-              {ACCENT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
+          <div className="accent-options" role="group" aria-label="主题色">
+            {ACCENT_OPTIONS.map((option) => (
+              <button key={option.value} type="button" className="accent-swatch" title={option.label}
+                aria-label={option.label} aria-pressed={selectedAccent.value === option.value}
+                style={{ backgroundColor: option.color }} onClick={() => onChange({ accentColor: option.value })}>
+                {selectedAccent.value === option.value ? <Check size={15} strokeWidth={3} /> : null}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="setting-row setting-row--field">
           <span>

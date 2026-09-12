@@ -47,8 +47,8 @@ if (renderedMainListIcons !== paths.length) {
 const lightIconBackgrounds = await page.locator(".app-row .app-glyph--native").evaluateAll((icons) =>
   icons.map((icon) => getComputedStyle(icon).backgroundColor),
 );
-if (lightIconBackgrounds.some((color) => color !== "rgba(0, 0, 0, 0)")) {
-  throw new Error(`Expected transparent light-theme icon backgrounds, found ${lightIconBackgrounds.join(", ")}`);
+if (lightIconBackgrounds.some((color) => color === "rgba(0, 0, 0, 0)")) {
+  throw new Error(`Expected glass light-theme icon backgrounds, found ${lightIconBackgrounds.join(", ")}`);
 }
 const screenshotDir = process.env.TEMP ?? process.cwd();
 const appsScreenshot = path.join(screenshotDir, "app-proxy-apps.png");
@@ -60,14 +60,14 @@ await page.screenshot({ path: appsScreenshot, fullPage: true });
 
 await page.getByRole("button", { name: "添加应用", exact: true }).click();
 await page.getByRole("dialog", { name: "添加应用" }).waitFor();
-await page.getByPlaceholder("搜索应用名称或路径").fill("ChatGPT");
+await page.getByRole("textbox", { name: "搜索已安装应用", exact: true }).fill("ChatGPT");
 await page.locator(".installed-app-row img").waitFor();
 await page.getByText("自动包含应用组件", { exact: true }).waitFor();
 await page.getByRole("button", { name: "添加", exact: true }).click();
 await page.getByRole("button", { name: "已添加", exact: true }).waitFor();
 await page.screenshot({ path: pickerScreenshot, fullPage: true });
 await page.getByRole("button", { name: "关闭添加应用窗口" }).click();
-await page.getByText("应用组 · 自动包含 8 个组件", { exact: true }).waitFor();
+await page.locator('.app-row__type[title="自动包含 8 个组件"]').waitFor();
 
 await page.getByRole("button", { name: "设置", exact: true }).click();
 await page.getByRole("heading", { name: "设置", exact: true }).waitFor();
@@ -91,14 +91,14 @@ await suffixInput.fill("-work");
 await suffixInput.press("Enter");
 await page.waitForFunction(() => JSON.parse(localStorage.getItem("app-proxy-state-v1")).settings.launcherSuffix === "-work");
 await page.getByText("示例：Chrome-work.lnk", { exact: true }).waitFor();
-const accentSelect = page.getByRole("combobox", { name: "主题色" });
-if ((await accentSelect.inputValue()) !== "blue") throw new Error("Expected blue as the default accent color");
-await accentSelect.selectOption("purple");
+const accentOptions = page.getByRole("group", { name: "主题色" });
+if ((await accentOptions.getByRole("button", { name: "蓝色", exact: true }).getAttribute("aria-pressed")) !== "true") throw new Error("Expected blue as the default accent color");
+await accentOptions.getByRole("button", { name: "紫色", exact: true }).click();
 await page.waitForFunction(() => document.documentElement.dataset.accent === "purple");
 const lightAccent = await page.evaluate(() =>
   getComputedStyle(document.documentElement).getPropertyValue("--accent").trim(),
 );
-if (lightAccent.toLocaleLowerCase() !== "#7c3aed") {
+if (lightAccent.toLocaleLowerCase() !== "#8255cb") {
   throw new Error(`Expected purple light accent, found ${lightAccent}`);
 }
 await page.getByRole("button", { name: "测试连接" }).click();
@@ -109,7 +109,7 @@ await page.getByRole("button", { name: "设置", exact: true }).click();
 if ((await page.getByRole("combobox", { name: "代理协议" }).inputValue()) !== "http") throw new Error("Expected saved HTTP protocol after reload");
 if ((await page.getByRole("textbox", { name: "代理主机和端口" }).inputValue()) !== "127.0.0.1:7890") throw new Error("Expected saved endpoint after reload");
 if ((await page.getByRole("textbox", { name: "快捷方式后缀" }).inputValue()) !== "-work") throw new Error("Expected saved shortcut suffix after reload");
-if ((await page.getByRole("combobox", { name: "主题色" }).inputValue()) !== "purple") throw new Error("Expected saved purple accent after reload");
+if ((await page.getByRole("button", { name: "紫色", exact: true }).getAttribute("aria-pressed")) !== "true") throw new Error("Expected saved purple accent after reload");
 await page.setViewportSize({ width: 920, height: 700 });
 const suffixLayout = await page.locator(".setting-row--field").evaluate((row) => {
   const description = row.querySelector(":scope > span")?.getBoundingClientRect();
@@ -125,7 +125,7 @@ if (!suffixLayout.descriptionRight || !suffixLayout.inputLeft || suffixLayout.in
 }
 const accentLayout = await page.locator(".setting-row--accent").evaluate((row) => {
   const description = row.querySelector(":scope > span")?.getBoundingClientRect();
-  const select = row.querySelector("select")?.getBoundingClientRect();
+  const select = row.querySelector(".accent-options")?.getBoundingClientRect();
   return { descriptionRight: description?.right, selectLeft: select?.left };
 });
 if (!accentLayout.descriptionRight || !accentLayout.selectLeft || accentLayout.selectLeft < accentLayout.descriptionRight) {
@@ -154,23 +154,23 @@ await page.getByRole("button", { name: "使用环境代理启动 Google Chrome" 
 await page.getByText("已发送 Google Chrome 的环境代理启动请求（浏览器预览）").waitFor();
 await page.getByRole("button", { name: "为 Google Chrome 创建桌面代理启动器" }).click();
 await page.getByText("已创建“Google Chrome-work”桌面启动器；关闭应用代理后仍可使用").waitFor();
-await page.getByText("已添加 6 个应用").waitFor();
-await page.getByRole("button", { name: "切换到深色模式" }).click();
+if (await page.locator(".app-row").count() !== 6) throw new Error("Expected six added applications");
+await page.getByRole("button", { name: "深色", exact: true }).click();
 await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
 const darkAccent = await page.evaluate(() =>
   getComputedStyle(document.documentElement).getPropertyValue("--accent").trim(),
 );
-if (darkAccent.toLocaleLowerCase() !== "#a78bfa") {
+if (darkAccent.toLocaleLowerCase() !== "#baa0f5") {
   throw new Error(`Expected purple dark accent, found ${darkAccent}`);
 }
 const darkIconBackgrounds = await page.locator(".app-row .app-glyph--native").evaluateAll((icons) =>
   icons.map((icon) => getComputedStyle(icon).backgroundColor),
 );
-if (darkIconBackgrounds.some((color) => color !== "rgba(0, 0, 0, 0)")) {
-  throw new Error(`Expected transparent dark-theme icon backgrounds, found ${darkIconBackgrounds.join(", ")}`);
+if (darkIconBackgrounds.some((color) => color === "rgba(0, 0, 0, 0)")) {
+  throw new Error(`Expected glass dark-theme icon backgrounds, found ${darkIconBackgrounds.join(", ")}`);
 }
-await page.getByRole("button", { name: "切换到浅色模式" }).click();
-await page.getByText("按需代理", { exact: true }).waitFor();
+await page.getByRole("button", { name: "浅色", exact: true }).click();
+await page.getByText("按需启动", { exact: true }).waitFor();
 await page.reload({ waitUntil: "networkidle" });
 await page.waitForFunction(() => document.documentElement.dataset.accent === "purple");
 
@@ -195,3 +195,5 @@ const compactMetrics = await page.evaluate(() => ({
 
 console.log(JSON.stringify({ metrics, compactMetrics, suffixLayout, accentLayout, gitIconLoaded, renderedMainListIcons, lightAccent, darkAccent, lightIconBackgrounds, darkIconBackgrounds, consoleErrors, appsScreenshot, pickerScreenshot, settingsScreenshot, settingsCompactScreenshot, toolsScreenshot }, null, 2));
 await browser.close();
+if (consoleErrors.length > 0) throw new Error(`Browser console errors: ${consoleErrors.join("; ")}`);
+if (compactMetrics.workspaceScrollWidth > compactMetrics.workspaceClientWidth) throw new Error("Compact workspace overflows horizontally");

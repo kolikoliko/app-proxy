@@ -102,7 +102,7 @@ export function InstalledAppsDialog({ existingRules, onAdd, onBrowse, onClose }:
         <div className="app-picker__toolbar">
           <label className="search-field">
             <Search size={17} />
-            <input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索应用名称或路径" />
+            <input ref={searchRef} aria-label="搜索已安装应用" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索应用名称或路径" />
           </label>
           <button type="button" className="button" onClick={() => void loadApps()} disabled={loading}>
             <RefreshCw size={16} className={loading ? "spin" : undefined} />刷新
