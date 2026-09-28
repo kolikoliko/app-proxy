@@ -241,6 +241,8 @@ fn write_launcher_files(
 
     let script = directory.join("Launch-With-Proxy.ps1");
     write_utf8_bom(&script, RUNTIME_SCRIPT)?;
+    let resumer = directory.join("Resume-Packaged-App.ps1");
+    write_utf8_bom(&resumer, PACKAGE_THREAD_RESUMER_SCRIPT)?;
     let command = directory.join("Launch-With-Proxy.cmd");
     fs::write(
         &command,
@@ -425,6 +427,65 @@ if (Test-Path -LiteralPath $IconPath) { $shortcut.IconLocation = "$IconPath,0" }
 $shortcut.Save()
 "#;
 
+const PACKAGE_THREAD_RESUMER_SCRIPT: &str = r#"param(
+  [uint32]$p = 0,
+  [uint32]$tid = 0
+)
+$ErrorActionPreference = 'Stop'
+if ($tid -eq 0) { exit 2 }
+
+$source = @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class PackageThreadResumer
+{
+    const uint ThreadSuspendResume = 0x0002;
+    const uint InvalidSuspendCount = 0xFFFFFFFF;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern IntPtr OpenThread(uint desiredAccess, bool inheritHandle, uint threadId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern uint ResumeThread(IntPtr threadHandle);
+
+    [DllImport("kernel32.dll")]
+    static extern bool CloseHandle(IntPtr handle);
+
+    public static int Resume(uint threadId)
+    {
+        IntPtr thread = OpenThread(ThreadSuspendResume, false, threadId);
+        if (thread == IntPtr.Zero)
+        {
+            return Marshal.GetLastWin32Error();
+        }
+
+        try
+        {
+            uint previousCount;
+            do
+            {
+                previousCount = ResumeThread(thread);
+                if (previousCount == InvalidSuspendCount)
+                {
+                    return Marshal.GetLastWin32Error();
+                }
+            }
+            while (previousCount > 1);
+            return 0;
+        }
+        finally
+        {
+            CloseHandle(thread);
+        }
+    }
+}
+'@
+
+Add-Type -TypeDefinition $source -Language CSharp
+exit [PackageThreadResumer]::Resume($tid)
+"#;
+
 const RUNTIME_SCRIPT: &str = r#"param([Parameter(Mandatory=$true)][string]$ConfigPath)
 $ErrorActionPreference = 'Stop'
 
@@ -439,6 +500,163 @@ function Test-TcpPort([string]$HostName, [int]$Port) {
     $task = $client.ConnectAsync($HostName, $Port)
     return $task.Wait(1800) -and $client.Connected
   } catch { return $false } finally { $client.Dispose() }
+}
+
+function Start-PackagedApplication(
+  [string]$PackageFullName,
+  [string]$AppUserModelId,
+  [string]$DebuggerCommandLine,
+  [string[]]$Arguments,
+  [string[]]$Environment
+) {
+  $source = @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace AppProxy
+{
+    [Flags]
+    public enum ActivateOptions
+    {
+        None = 0
+    }
+
+    [ComImport]
+    [Guid("2e941141-7f97-4756-ba1d-9decde894a3d")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IApplicationActivationManager
+    {
+        [PreserveSig]
+        int ActivateApplication(
+            [In, MarshalAs(UnmanagedType.LPWStr)] string appUserModelId,
+            [In, MarshalAs(UnmanagedType.LPWStr)] string arguments,
+            [In] ActivateOptions options,
+            [Out] out uint processId);
+    }
+
+    [ComImport]
+    [Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")]
+    class ApplicationActivationManager
+    {
+    }
+
+    [ComImport]
+    [Guid("F27C3930-8029-4AD1-94E3-3DBA417810C1")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IPackageDebugSettings
+    {
+        [PreserveSig]
+        int EnableDebugging(
+            [In, MarshalAs(UnmanagedType.LPWStr)] string packageFullName,
+            [In, MarshalAs(UnmanagedType.LPWStr)] string debuggerCommandLine,
+            IntPtr environment);
+
+        [PreserveSig]
+        int DisableDebugging(
+            [In, MarshalAs(UnmanagedType.LPWStr)] string packageFullName);
+    }
+
+    [ComImport]
+    [Guid("B1AEC16F-2383-4852-B0E9-8F0B1DC66B4D")]
+    class PackageDebugSettings
+    {
+    }
+
+    public static class PackageActivator
+    {
+        static IntPtr BuildEnvironmentBlock(string[] environment)
+        {
+            if (environment == null || environment.Length == 0)
+            {
+                return IntPtr.Zero;
+            }
+
+            var variables = (string[])environment.Clone();
+            Array.Sort(variables, StringComparer.OrdinalIgnoreCase);
+            int characterCount = 1;
+            foreach (string variable in variables)
+            {
+                characterCount += variable.Length + 1;
+            }
+
+            IntPtr block = Marshal.AllocHGlobal(characterCount * 2);
+            int offset = 0;
+            foreach (string variable in variables)
+            {
+                foreach (char character in variable)
+                {
+                    Marshal.WriteInt16(block, offset * 2, (short)character);
+                    offset++;
+                }
+                Marshal.WriteInt16(block, offset * 2, 0);
+                offset++;
+            }
+            Marshal.WriteInt16(block, offset * 2, 0);
+            return block;
+        }
+
+        public static uint ActivateWithEnvironment(
+            string packageFullName,
+            string appUserModelId,
+            string debuggerCommandLine,
+            string arguments,
+            string[] environment)
+        {
+            var manager = (IApplicationActivationManager)new ApplicationActivationManager();
+            var debugSettings = (IPackageDebugSettings)new PackageDebugSettings();
+            IntPtr environmentBlock = IntPtr.Zero;
+            uint processId = 0;
+            int activationResult = 0;
+            int cleanupResult = 0;
+            bool debuggingEnabled = false;
+
+            try
+            {
+                environmentBlock = BuildEnvironmentBlock(environment);
+
+                int enableResult = debugSettings.EnableDebugging(
+                    packageFullName,
+                    debuggerCommandLine,
+                    environmentBlock);
+                Marshal.ThrowExceptionForHR(enableResult);
+                debuggingEnabled = true;
+
+                activationResult = manager.ActivateApplication(
+                    appUserModelId,
+                    arguments ?? String.Empty,
+                    ActivateOptions.None,
+                    out processId);
+            }
+            finally
+            {
+                if (debuggingEnabled)
+                {
+                    cleanupResult = debugSettings.DisableDebugging(packageFullName);
+                }
+                if (environmentBlock != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(environmentBlock);
+                }
+                Marshal.FinalReleaseComObject(debugSettings);
+                Marshal.FinalReleaseComObject(manager);
+            }
+
+            Marshal.ThrowExceptionForHR(activationResult);
+            Marshal.ThrowExceptionForHR(cleanupResult);
+            return processId;
+        }
+    }
+}
+'@
+  Add-Type -TypeDefinition $source -Language CSharp
+  $argumentLine = if ($Arguments) { $Arguments -join ' ' } else { '' }
+  [AppProxy.PackageActivator]::ActivateWithEnvironment(
+    $PackageFullName,
+    $AppUserModelId,
+    $DebuggerCommandLine,
+    $argumentLine,
+    $Environment
+  ) | Out-Null
 }
 
 function Resolve-Target($Config) {
@@ -458,12 +676,23 @@ function Resolve-Target($Config) {
     if (-not $application) { throw "无法从应用清单解析启动入口：$($Config.displayName)" }
     $candidate = Join-Path $package.InstallLocation ($application.Executable -replace '/', '\')
     if (-not (Test-Path -LiteralPath $candidate)) { throw "应用入口不存在：$candidate" }
-    return [PSCustomObject]@{ Path = $candidate; ScopeRoot = $package.InstallLocation }
+    $appUserModelId = "$($package.PackageFamilyName)!$($application.Id)"
+    return [PSCustomObject]@{
+      Path = $candidate
+      ScopeRoot = $package.InstallLocation
+      PackageFullName = $package.PackageFullName
+      AppUserModelId = $appUserModelId
+    }
   }
   if (-not (Test-Path -LiteralPath $Config.executablePath)) {
     throw "目标程序不存在：$($Config.executablePath)"
   }
-  return [PSCustomObject]@{ Path = $Config.executablePath; ScopeRoot = $null }
+  return [PSCustomObject]@{
+    Path = $Config.executablePath
+    ScopeRoot = $null
+    PackageFullName = $null
+    AppUserModelId = $null
+  }
 }
 
 function Get-RunningProcesses($TargetInfo, $Config) {
@@ -526,13 +755,35 @@ try {
   $env:HTTP_PROXY=$httpProxy; $env:HTTPS_PROXY=$httpProxy; $env:ALL_PROXY=$allProxy
   $env:http_proxy=$httpProxy; $env:https_proxy=$httpProxy; $env:all_proxy=$allProxy
   $env:NO_PROXY='localhost,127.0.0.1,::1'; $env:no_proxy=$env:NO_PROXY
+  $packageEnvironment = @(
+    "ALL_PROXY=$allProxy"
+    "HTTP_PROXY=$httpProxy"
+    "HTTPS_PROXY=$httpProxy"
+    "NO_PROXY=$($env:NO_PROXY)"
+  )
 
   $arguments = @()
   if ($config.chromiumMode) {
     $arguments += "--proxy-server=$chromiumProxy"
     $arguments += '--proxy-bypass-list=<-loopback>;localhost;127.0.0.1;::1'
   }
-  if ($arguments.Count -gt 0) {
+  if ($targetInfo.AppUserModelId) {
+    $resumerPath = Join-Path (Split-Path -Parent $ConfigPath) 'Resume-Packaged-App.ps1'
+    if (-not (Test-Path -LiteralPath $resumerPath)) {
+      throw "程序包线程恢复器不存在：$resumerPath"
+    }
+    $powershellPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $powershellPath)) {
+      throw "找不到系统 Windows PowerShell：$powershellPath"
+    }
+    $debuggerCommandLine = "$powershellPath -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$resumerPath`""
+    Start-PackagedApplication `
+      -PackageFullName $targetInfo.PackageFullName `
+      -AppUserModelId $targetInfo.AppUserModelId `
+      -DebuggerCommandLine $debuggerCommandLine `
+      -Arguments $arguments `
+      -Environment $packageEnvironment
+  } elseif ($arguments.Count -gt 0) {
     Start-Process -FilePath $target -ArgumentList $arguments
   } else {
     Start-Process -FilePath $target
@@ -548,7 +799,8 @@ mod tests {
     use super::{
         is_chromium_like, normalized_launcher_executable, powershell_command,
         sanitize_shortcut_name, shortcut_icon_path, shortcut_name, start_menu_shortcut_path,
-        validate_launcher_proxy, write_utf8_bom, LauncherFiles, RUNTIME_SCRIPT, SHORTCUT_SCRIPT,
+        validate_launcher_proxy, write_utf8_bom, LauncherFiles, PACKAGE_THREAD_RESUMER_SCRIPT,
+        RUNTIME_SCRIPT, SHORTCUT_SCRIPT,
     };
     use crate::store::AppRule;
     use std::path::PathBuf;
@@ -678,6 +930,7 @@ mod tests {
         std::fs::create_dir_all(&directory).unwrap();
         let parser = directory.join("Parse-Script.ps1");
         let runtime = directory.join("Launch-With-Proxy.ps1");
+        let resumer = directory.join("Resume-Packaged-App.ps1");
         let shortcut = directory.join("Create-Shortcut.ps1");
         write_utf8_bom(
             &parser,
@@ -693,9 +946,10 @@ if ($errors.Count -gt 0) {
         )
         .unwrap();
         write_utf8_bom(&runtime, RUNTIME_SCRIPT).unwrap();
+        write_utf8_bom(&resumer, PACKAGE_THREAD_RESUMER_SCRIPT).unwrap();
         write_utf8_bom(&shortcut, SHORTCUT_SCRIPT).unwrap();
 
-        for script in [&runtime, &shortcut] {
+        for script in [&runtime, &resumer, &shortcut] {
             let status = std::process::Command::new("powershell.exe")
                 .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
                 .arg(&parser)
@@ -706,6 +960,19 @@ if ($errors.Count -gt 0) {
             assert!(status.success(), "PowerShell parser rejected {script:?}");
         }
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn store_runtime_uses_package_activation_manager() {
+        assert!(RUNTIME_SCRIPT.contains("IApplicationActivationManager"));
+        assert!(RUNTIME_SCRIPT.contains("ActivateApplication"));
+        assert!(RUNTIME_SCRIPT.contains("IPackageDebugSettings"));
+        assert!(RUNTIME_SCRIPT.contains("EnableDebugging"));
+        assert!(RUNTIME_SCRIPT.contains("DisableDebugging"));
+        assert!(RUNTIME_SCRIPT.contains("Resume-Packaged-App.ps1"));
+        assert!(RUNTIME_SCRIPT.contains("$targetInfo.PackageFullName"));
+        assert!(RUNTIME_SCRIPT.contains("$targetInfo.AppUserModelId"));
+        assert!(RUNTIME_SCRIPT.contains("-Environment $packageEnvironment"));
     }
 
     #[cfg(windows)]
