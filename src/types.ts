@@ -19,6 +19,7 @@ export type AppRule = {
   applicationId?: string;
   executableScopeRoot?: string;
   scopeExecutableCount?: number;
+  chromiumProxyMode?: boolean;
   pinned: boolean;
   createdAt: string;
   updatedAt: string;

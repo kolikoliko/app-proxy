@@ -132,6 +132,55 @@ pub fn remove_launcher_files(app: &AppHandle, rule_id: &str) -> Result<bool, Str
     remove_launcher_dir(&launchers_root, rule_id)
 }
 
+pub fn sync_rule_launcher(
+    app: &AppHandle,
+    rule: &AppRule,
+    proxy_url: &str,
+) -> Result<bool, String> {
+    if !is_safe_rule_id(&rule.id) {
+        return Err("无效的应用规则标识".into());
+    }
+    let directory = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("无法确定启动器目录：{error}"))?
+        .join("launchers")
+        .join(&rule.id);
+    sync_rule_launcher_in_dir(&directory, rule, proxy_url)
+}
+
+fn sync_rule_launcher_in_dir(
+    directory: &Path,
+    rule: &AppRule,
+    proxy_url: &str,
+) -> Result<bool, String> {
+    let config_path = directory.join("launcher.json");
+    if !config_path.is_file() {
+        return Ok(false);
+    }
+    validate_launcher_proxy(proxy_url)?;
+    let chromium_mode = is_chromium_like(rule);
+    let executable_path = normalized_launcher_executable(rule, chromium_mode);
+    let config = LauncherConfig {
+        display_name: rule.display_name.clone(),
+        executable_path,
+        executable_name: rule.executable_name.clone(),
+        package_family_name: rule.package_family_name.clone(),
+        application_id: rule.application_id.clone(),
+        proxy_url: proxy_url.to_string(),
+        chromium_mode,
+    };
+    let config_json = serde_json::to_string_pretty(&config).map_err(|error| error.to_string())?;
+    fs::write(&config_path, config_json).map_err(|error| format!("无法同步启动器配置：{error}"))?;
+    let script = directory.join("Launch-With-Proxy.ps1");
+    if script.is_file() {
+        let _ = write_utf8_bom(&script, RUNTIME_SCRIPT);
+        let resumer = directory.join("Resume-Packaged-App.ps1");
+        let _ = write_utf8_bom(&resumer, PACKAGE_THREAD_RESUMER_SCRIPT);
+    }
+    Ok(true)
+}
+
 fn is_safe_rule_id(rule_id: &str) -> bool {
     !rule_id.is_empty()
         && rule_id
@@ -415,7 +464,63 @@ fn proxy_display(value: &str) -> Result<String, String> {
     ))
 }
 
+fn has_chromium_markers_in_dir(directory: &Path) -> bool {
+    if directory.join("chrome_elf.dll").is_file()
+        || directory.join("libcef.dll").is_file()
+        || directory.join("chrome_100_percent.pak").is_file()
+        || directory.join("resources.pak").is_file()
+    {
+        return true;
+    }
+    directory.join("icudtl.dat").is_file()
+        && (directory.join("v8_context_snapshot.bin").is_file()
+            || directory.join("snapshot_blob.bin").is_file()
+            || directory.join("ffmpeg.dll").is_file())
+}
+
+fn looks_like_version_directory(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| {
+            value.contains('.')
+                && value
+                    .chars()
+                    .all(|character| character.is_ascii_digit() || character == '.')
+        })
+}
+
+fn has_chromium_runtime_files(executable_path: &Path) -> bool {
+    let Some(parent) = executable_path.parent() else {
+        return false;
+    };
+    if has_chromium_markers_in_dir(parent) {
+        return true;
+    }
+    if let Ok(entries) = fs::read_dir(parent) {
+        let mut checked = 0usize;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                continue;
+            }
+            if looks_like_version_directory(&path) {
+                if has_chromium_markers_in_dir(&path) {
+                    return true;
+                }
+                checked += 1;
+                if checked >= 4 {
+                    break;
+                }
+            }
+        }
+    }
+    false
+}
+
 fn is_chromium_like(rule: &AppRule) -> bool {
+    if let Some(override_mode) = rule.chromium_proxy_mode {
+        return override_mode;
+    }
     if rule
         .package_family_name
         .as_deref()
@@ -423,7 +528,7 @@ fn is_chromium_like(rule: &AppRule) -> bool {
     {
         return true;
     }
-    matches!(
+    if matches!(
         rule.executable_name.to_ascii_lowercase().as_str(),
         "chatgpt.exe"
             | "codex.exe"
@@ -432,13 +537,26 @@ fn is_chromium_like(rule: &AppRule) -> bool {
             | "brave.exe"
             | "opera.exe"
             | "vivaldi.exe"
+            | "arc.exe"
             | "code.exe"
             | "cursor.exe"
+            | "windsurf.exe"
+            | "trae.exe"
+            | "antigravity.exe"
+            | "claude.exe"
+            | "notion.exe"
+            | "obsidian.exe"
+            | "postman.exe"
+            | "spotify.exe"
+            | "githubdesktop.exe"
             | "discord.exe"
             | "slack.exe"
             | "teams.exe"
             | "ms-teams.exe"
-    )
+    ) {
+        return true;
+    }
+    has_chromium_runtime_files(Path::new(&rule.executable_path))
 }
 
 fn normalized_launcher_executable(rule: &AppRule, chromium_mode: bool) -> String {
@@ -815,15 +933,13 @@ function Get-RunningProcesses($TargetInfo, $Config) {
   $scopeRoot = $TargetInfo.ScopeRoot
   $targetName = [IO.Path]::GetFileName($target)
   @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-    if (-not $_.ExecutablePath) {
-      $false
-    } elseif ($scopeRoot) {
+    if ($scopeRoot) {
       $scopePrefix = $scopeRoot.TrimEnd('\') + '\'
-      $_.ExecutablePath.StartsWith($scopePrefix, [StringComparison]::OrdinalIgnoreCase)
+      $_.ExecutablePath -and $_.ExecutablePath.StartsWith($scopePrefix, [StringComparison]::OrdinalIgnoreCase)
     } elseif ($Config.chromiumMode) {
-      $_.Name.Equals($targetName, [StringComparison]::OrdinalIgnoreCase)
+      $_.Name -and $_.Name.Equals($targetName, [StringComparison]::OrdinalIgnoreCase)
     } else {
-      $_.ExecutablePath.Equals($target, [StringComparison]::OrdinalIgnoreCase)
+      $_.ExecutablePath -and $_.ExecutablePath.Equals($target, [StringComparison]::OrdinalIgnoreCase)
     }
   })
 }
@@ -862,30 +978,38 @@ try {
   if ($scheme -in @('socks', 'socks5')) {
     $httpProxy = "http://$hostPort"
     $allProxy = "socks5://$hostPort"
-    $chromiumProxy = "http=$hostPort;https=$hostPort;socks=$hostPort"
+    $chromiumProxy = "socks5://$hostPort"
   } elseif ($scheme -eq 'https') {
     $httpProxy = "https://$hostPort"
     $allProxy = $httpProxy
-    $chromiumProxy = "http=https://$hostPort;https=https://$hostPort"
+    $chromiumProxy = "https://$hostPort"
   } else {
     $httpProxy = "http://$hostPort"
     $allProxy = $httpProxy
-    $chromiumProxy = "http=$hostPort;https=$hostPort"
+    $chromiumProxy = "http://$hostPort"
   }
+  $bypassList = 'localhost;127.0.0.1;::1'
+  $webview2ProxyArgs = "--proxy-server=$chromiumProxy --proxy-bypass-list=$bypassList"
   $env:HTTP_PROXY=$httpProxy; $env:HTTPS_PROXY=$httpProxy; $env:ALL_PROXY=$allProxy
   $env:http_proxy=$httpProxy; $env:https_proxy=$httpProxy; $env:all_proxy=$allProxy
   $env:NO_PROXY='localhost,127.0.0.1,::1'; $env:no_proxy=$env:NO_PROXY
+  $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = if ($env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS) {
+    "$($env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS) $webview2ProxyArgs"
+  } else {
+    $webview2ProxyArgs
+  }
   $packageEnvironment = @(
     "ALL_PROXY=$allProxy"
     "HTTP_PROXY=$httpProxy"
     "HTTPS_PROXY=$httpProxy"
     "NO_PROXY=$($env:NO_PROXY)"
+    "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=$webview2ProxyArgs"
   )
 
   $arguments = @()
   if ($config.chromiumMode) {
     $arguments += "--proxy-server=$chromiumProxy"
-    $arguments += '--proxy-bypass-list=<-loopback>;localhost;127.0.0.1;::1'
+    $arguments += "--proxy-bypass-list=$bypassList"
   }
   if ($targetInfo.AppUserModelId) {
     $resumerPath = Join-Path (Split-Path -Parent $ConfigPath) 'Resume-Packaged-App.ps1'
@@ -904,7 +1028,10 @@ try {
       -Arguments $arguments `
       -Environment $packageEnvironment
   } elseif ($arguments.Count -gt 0) {
-    Start-Process -FilePath $target -ArgumentList $arguments
+    $quotedArgs = @($arguments | ForEach-Object {
+      if ($_ -match '[\s;"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+    })
+    Start-Process -FilePath $target -ArgumentList $quotedArgs
   } else {
     Start-Process -FilePath $target
   }
@@ -919,9 +1046,9 @@ mod tests {
     use super::{
         is_chromium_like, is_safe_rule_id, normalized_launcher_executable, powershell_command,
         remove_launcher_dir, sanitize_shortcut_name, shortcut_icon_path, shortcut_name,
-        start_menu_shortcut_path, sync_launchers_in_dir, validate_launcher_proxy, write_utf8_bom,
-        LauncherConfig, LauncherFiles, PACKAGE_THREAD_RESUMER_SCRIPT, RUNTIME_SCRIPT,
-        SHORTCUT_SCRIPT,
+        start_menu_shortcut_path, sync_launchers_in_dir, sync_rule_launcher_in_dir,
+        validate_launcher_proxy, write_utf8_bom, LauncherConfig, LauncherFiles,
+        PACKAGE_THREAD_RESUMER_SCRIPT, RUNTIME_SCRIPT, SHORTCUT_SCRIPT,
     };
     use crate::store::AppRule;
     use std::path::PathBuf;
@@ -936,6 +1063,7 @@ mod tests {
             application_id: None,
             executable_scope_root: None,
             scope_executable_count: 0,
+            chromium_proxy_mode: None,
             pinned: true,
             created_at: "0".into(),
             updated_at: "0".into(),
@@ -1242,9 +1370,94 @@ if ($errors.Count -gt 0) {
     fn runtime_script_preserves_https_proxy_scheme() {
         assert!(RUNTIME_SCRIPT.contains("elseif ($scheme -eq 'https')"));
         assert!(RUNTIME_SCRIPT.contains("$httpProxy = \"https://$hostPort\""));
-        assert!(RUNTIME_SCRIPT
-            .contains("$chromiumProxy = \"http=https://$hostPort;https=https://$hostPort\""));
+        assert!(RUNTIME_SCRIPT.contains("$chromiumProxy = \"https://$hostPort\""));
+        assert!(RUNTIME_SCRIPT.contains("$chromiumProxy = \"socks5://$hostPort\""));
+        assert!(RUNTIME_SCRIPT.contains("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"));
+        assert!(!RUNTIME_SCRIPT.contains("<-loopback>"));
         assert!(!RUNTIME_SCRIPT.contains("Clash / Mihomo"));
+    }
+
+    #[test]
+    fn detects_chromium_apps_by_runtime_files_and_respects_manual_override() {
+        let directory = std::env::temp_dir().join(format!(
+            "app-proxy-chromium-detect-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let electron_dir = directory.join("custom-electron");
+        let versioned_dir = directory.join("custom-browser");
+        let version_sub = versioned_dir.join("134.0.6998.89");
+        let plain_dir = directory.join("plain-app");
+        std::fs::create_dir_all(&electron_dir).unwrap();
+        std::fs::create_dir_all(&version_sub).unwrap();
+        std::fs::create_dir_all(&plain_dir).unwrap();
+
+        let electron_exe = electron_dir.join("MyNotes.exe");
+        std::fs::write(&electron_exe, []).unwrap();
+        std::fs::write(electron_dir.join("chrome_elf.dll"), []).unwrap();
+
+        let browser_exe = versioned_dir.join("MyBrowser.exe");
+        std::fs::write(&browser_exe, []).unwrap();
+        std::fs::write(version_sub.join("resources.pak"), []).unwrap();
+
+        let plain_exe = plain_dir.join("MyTool.exe");
+        std::fs::write(&plain_exe, []).unwrap();
+
+        let mut electron_rule = rule("MyNotes.exe", None);
+        electron_rule.executable_path = electron_exe.to_string_lossy().into_owned();
+        assert!(is_chromium_like(&electron_rule));
+        electron_rule.chromium_proxy_mode = Some(false);
+        assert!(!is_chromium_like(&electron_rule));
+
+        let mut browser_rule = rule("MyBrowser.exe", None);
+        browser_rule.executable_path = browser_exe.to_string_lossy().into_owned();
+        assert!(is_chromium_like(&browser_rule));
+
+        let mut plain_rule = rule("MyTool.exe", None);
+        plain_rule.executable_path = plain_exe.to_string_lossy().into_owned();
+        assert!(!is_chromium_like(&plain_rule));
+        plain_rule.chromium_proxy_mode = Some(true);
+        assert!(is_chromium_like(&plain_rule));
+
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn sync_rule_launcher_updates_chromium_mode_in_existing_config() {
+        let directory =
+            std::env::temp_dir().join(format!("app-proxy-sync-rule-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+
+        let mut plain_rule = rule("MyTool.exe", None);
+        assert!(
+            !sync_rule_launcher_in_dir(&directory, &plain_rule, "http://127.0.0.1:7890").unwrap()
+        );
+
+        let initial = LauncherConfig {
+            display_name: "Test".into(),
+            executable_path: plain_rule.executable_path.clone(),
+            executable_name: plain_rule.executable_name.clone(),
+            package_family_name: None,
+            application_id: None,
+            proxy_url: "http://127.0.0.1:7890".into(),
+            chromium_mode: false,
+        };
+        std::fs::write(
+            directory.join("launcher.json"),
+            serde_json::to_string_pretty(&initial).unwrap(),
+        )
+        .unwrap();
+
+        plain_rule.chromium_proxy_mode = Some(true);
+        assert!(
+            sync_rule_launcher_in_dir(&directory, &plain_rule, "http://127.0.0.1:7890").unwrap()
+        );
+        let saved: LauncherConfig = serde_json::from_str(
+            &std::fs::read_to_string(directory.join("launcher.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(saved.chromium_mode);
+
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[cfg(windows)]

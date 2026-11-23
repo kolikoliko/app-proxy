@@ -56,6 +56,8 @@ pub struct AppRule {
     pub executable_scope_root: Option<String>,
     #[serde(default)]
     pub scope_executable_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chromium_proxy_mode: Option<bool>,
     pub pinned: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -182,6 +184,7 @@ impl AppStore {
                     application_id: application_id.map(str::to_string),
                     executable_scope_root: executable_scope_root.map(str::to_string),
                     scope_executable_count,
+                    chromium_proxy_mode: None,
                     pinned: true,
                     created_at: now.clone(),
                     updated_at: now,

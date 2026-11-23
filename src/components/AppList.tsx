@@ -7,16 +7,46 @@ type AppListProps = {
   rules: AppRule[];
   onAdd: () => void;
   onRemove: (id: string) => void;
+  onToggleChromiumMode: (id: string, nextMode?: boolean) => void;
   onProxyLaunch: (id: string) => void;
   onCreateLauncher: (id: string) => void;
   onCreateStartMenuLauncher: (id: string) => void;
   busyAction?: string;
 };
 
+function nextChromiumMode(current?: boolean): boolean | undefined {
+  if (current === undefined) return true;
+  if (current === true) return false;
+  return undefined;
+}
+
+function chromiumModeMeta(current?: boolean) {
+  if (current === true) {
+    return {
+      key: "forced",
+      label: "强制参数",
+      title: "已强制附加 --proxy-server 启动参数（点击切换为仅环境变量）",
+    };
+  }
+  if (current === false) {
+    return {
+      key: "env-only",
+      label: "仅环境",
+      title: "仅注入代理环境变量，不附加 Chromium 启动参数（点击恢复自动识别）",
+    };
+  }
+  return {
+    key: "auto",
+    label: "自动参数",
+    title: "自动识别 Chromium/Electron/CEF 应用并附加 --proxy-server 参数（点击强制开启）",
+  };
+}
+
 export function AppList({
   rules,
   onAdd,
   onRemove,
+  onToggleChromiumMode,
   onProxyLaunch,
   onCreateLauncher,
   onCreateStartMenuLauncher,
@@ -44,7 +74,7 @@ export function AppList({
       </div> : null}
       <div className="app-list" role="list">
         <div className="app-list__head" aria-hidden="true">
-          <span>应用名称 / 路径</span><span>应用类型</span><span>操作</span>
+          <span>应用名称 / 路径</span><span>类型与参数</span><span>操作</span>
         </div>
         {rules.length === 0 ? (
           <div className="empty-state">
@@ -67,7 +97,25 @@ export function AppList({
                 <small className="app-row__path" title={rule.executablePath}>{rule.executablePath}</small>
               </span>
             </div>
-            <span className="app-row__type" title={rule.executableScopeRoot ? `自动包含 ${rule.scopeExecutableCount || 1} 个组件` : rule.executableName}>{rule.packageFamilyName ? "Store 应用" : "桌面应用"}</span>
+            <div className="app-row__meta">
+              <span className="app-row__type" title={rule.executableScopeRoot ? `自动包含 ${rule.scopeExecutableCount || 1} 个组件` : rule.executableName}>{rule.packageFamilyName ? "Store 应用" : "桌面应用"}</span>
+              {(() => {
+                const mode = chromiumModeMeta(rule.chromiumProxyMode);
+                return (
+                  <button
+                    type="button"
+                    className="app-row__mode"
+                    data-mode={mode.key}
+                    disabled={Boolean(busyAction)}
+                    title={mode.title}
+                    aria-label={`${rule.displayName} 代理参数模式：${mode.label}`}
+                    onClick={() => onToggleChromiumMode(rule.id, nextChromiumMode(rule.chromiumProxyMode))}
+                  >
+                    {mode.label}
+                  </button>
+                );
+              })()}
+            </div>
             <div className="app-row__actions">
               <button
                 type="button"

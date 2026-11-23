@@ -262,6 +262,32 @@ fn remove_rule(
     Ok(updated)
 }
 
+#[tauri::command]
+fn set_rule_chromium_mode(
+    id: String,
+    chromium_proxy_mode: Option<bool>,
+    store: tauri::State<'_, AppStore>,
+    app: tauri::AppHandle,
+) -> Result<PersistedState, String> {
+    let mut found = false;
+    let updated = store.update(|state| {
+        if let Some(rule) = state.rules.iter_mut().find(|rule| rule.id == id) {
+            found = true;
+            if rule.chromium_proxy_mode != chromium_proxy_mode {
+                rule.chromium_proxy_mode = chromium_proxy_mode;
+                rule.updated_at = store::now_string();
+            }
+        }
+    })?;
+    if !found {
+        return Err("找不到该应用规则".into());
+    }
+    if let Some(rule) = updated.rules.iter().find(|rule| rule.id == id) {
+        let _ = launcher::sync_rule_launcher(&app, rule, &updated.settings.proxy_url);
+    }
+    Ok(updated)
+}
+
 fn launcher_rule(store: &AppStore, id: &str) -> Result<(store::AppRule, String, String), String> {
     let state = store.load()?;
     let mut rule = state
@@ -608,6 +634,7 @@ pub fn run() {
             list_installed_apps,
             get_app_icon,
             remove_rule,
+            set_rule_chromium_mode,
             launch_rule_with_proxy,
             create_rule_desktop_launcher,
             create_rule_start_menu_launcher,
@@ -651,6 +678,7 @@ mod tests {
             application_id: None,
             executable_scope_root: None,
             scope_executable_count: 0,
+            chromium_proxy_mode: None,
             pinned: true,
             created_at: "1".into(),
             updated_at: "1".into(),

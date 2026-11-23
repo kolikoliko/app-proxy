@@ -6,7 +6,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { Sidebar, type NavigationView } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { ToolProxyPanel } from "./components/ToolProxyPanel";
-import { addRule, chooseExecutable, createRuleDesktopLauncher, createRuleStartMenuLauncher, launchRuleWithProxy, loadState, onTrayLaunchError, removeRule, saveSettings, syncAutostart, testProxy } from "./lib/bridge";
+import { addRule, chooseExecutable, createRuleDesktopLauncher, createRuleStartMenuLauncher, launchRuleWithProxy, loadState, onTrayLaunchError, removeRule, saveSettings, setRuleChromiumMode, syncAutostart, testProxy } from "./lib/bridge";
 import { DEFAULT_STATE } from "./lib/defaults";
 import { createSerialQueue, isLatestRequest, settleSubscription } from "./lib/asyncControl";
 import { useAppUpdater } from "./hooks/useAppUpdater";
@@ -232,6 +232,7 @@ export function App() {
                 rules={state.rules}
                 onAdd={() => setPickerOpen(true)}
                 onRemove={(id) => void applyStateMutation(() => removeRule(id)).catch(() => undefined)}
+                onToggleChromiumMode={(id, nextMode) => void applyStateMutation(() => setRuleChromiumMode(id, nextMode)).catch(() => undefined)}
                 onProxyLaunch={(id) => void handleLauncherAction(id, "launch")}
                 onCreateLauncher={(id) => void handleLauncherAction(id, "shortcut")}
                 onCreateStartMenuLauncher={(id) => void handleLauncherAction(id, "start-menu")}

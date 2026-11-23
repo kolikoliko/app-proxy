@@ -52,6 +52,7 @@ function readBrowserState(): PersistedState {
           applicationId: rule.applicationId,
           executableScopeRoot,
           scopeExecutableCount: rule.scopeExecutableCount ?? (executableScopeRoot ? 1 : 0),
+          chromiumProxyMode: typeof rule.chromiumProxyMode === "boolean" ? rule.chromiumProxyMode : undefined,
           pinned: rule.pinned,
           createdAt: rule.createdAt,
           updatedAt: rule.updatedAt,
@@ -177,6 +178,27 @@ export async function removeRule(id: string): Promise<PersistedState> {
   if (isTauriRuntime()) return invoke<PersistedState>("remove_rule", { id });
   const state = readBrowserState();
   state.rules = state.rules.filter((rule) => rule.id !== id);
+  writeBrowserState(state);
+  return state;
+}
+
+export async function setRuleChromiumMode(
+  id: string,
+  chromiumProxyMode?: boolean,
+): Promise<PersistedState> {
+  if (isTauriRuntime()) {
+    return invoke<PersistedState>("set_rule_chromium_mode", {
+      id,
+      chromiumProxyMode: chromiumProxyMode ?? null,
+    });
+  }
+  const state = readBrowserState();
+  const now = new Date().toISOString();
+  state.rules = state.rules.map((rule) => (
+    rule.id === id
+      ? { ...rule, chromiumProxyMode, updatedAt: now }
+      : rule
+  ));
   writeBrowserState(state);
   return state;
 }
