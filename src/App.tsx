@@ -6,9 +6,9 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { Sidebar, type NavigationView } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { ToolProxyPanel } from "./components/ToolProxyPanel";
-import { addRule, chooseExecutable, createRuleDesktopLauncher, createRuleStartMenuLauncher, launchRuleWithProxy, loadState, removeRule, saveSettings, syncAutostart, testProxy } from "./lib/bridge";
+import { addRule, chooseExecutable, createRuleDesktopLauncher, createRuleStartMenuLauncher, launchRuleWithProxy, loadState, onTrayLaunchError, removeRule, saveSettings, syncAutostart, testProxy } from "./lib/bridge";
 import { DEFAULT_STATE } from "./lib/defaults";
-import { createSerialQueue, isLatestRequest } from "./lib/asyncControl";
+import { createSerialQueue, isLatestRequest, settleSubscription } from "./lib/asyncControl";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import type { AppSettings, InstalledApp, PersistedState, ProxyTestResult, ThemeMode } from "./types";
 
@@ -52,6 +52,21 @@ export function App() {
       .catch((reason) => setError(String(reason)))
       .finally(() => setLoaded(true));
   }, [refreshFromBackend]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unsubscribe: (() => void) | undefined;
+    void onTrayLaunchError((message) => {
+      setNotice(null);
+      setError(message);
+    })
+      .then((fn) => settleSubscription(() => disposed, (assigned) => { unsubscribe = assigned; }, fn))
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      unsubscribe?.();
+    };
+  }, []);
 
   useLayoutEffect(() => {
     const updateTheme = () => {
@@ -186,7 +201,10 @@ export function App() {
           <span className="workspace-label"><span />本地工作空间</span>
         </div>
         <div className="workspace-content">
-          {error ? <div className="error-banner" role="alert">{error}</div> : null}
+          {error ? <div className="error-banner" role="alert">
+            <span>{error}</span>
+            <button type="button" className="icon-button" aria-label="关闭错误提示" onClick={() => setError(null)}><X size={16} /></button>
+          </div> : null}
           {notice ? <div className="success-banner" role="status">
             <CheckCircle2 size={18} />
             <span>{notice}</span>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, CheckCircle2, LoaderCircle, Palette, ShieldCheck } from "lucide-react";
+import { Check, CheckCircle2, CircleAlert, LoaderCircle, Palette, ShieldCheck } from "lucide-react";
 import type { AccentColor, AppSettings, ProxyTestResult } from "../types";
 import type { AppUpdater } from "../hooks/useAppUpdater";
 import { Switch } from "./Switch";
@@ -118,9 +118,9 @@ export function SettingsPanel({ settings, testing, testResult, updater, onChange
         </button>
         {testResult ? (
           <div className="test-result" data-success={testResult.reachable}>
-            <CheckCircle2 size={17} />
+            {testResult.reachable ? <CheckCircle2 size={17} /> : <CircleAlert size={17} />}
             <span>{testResult.message}</span>
-            {testResult.latencyMs ? <strong>{testResult.latencyMs} ms</strong> : null}
+            {typeof testResult.latencyMs === "number" ? <strong>{testResult.latencyMs} ms</strong> : null}
           </div>
         ) : null}
         <div className="proxy-mode-notice proxy-mode-notice--compatible" role="note">

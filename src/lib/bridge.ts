@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { DEFAULT_STATE } from "./defaults";
@@ -274,4 +275,9 @@ export async function syncAutostart(enabled: boolean): Promise<void> {
   const current = await isEnabled();
   if (enabled && !current) await enable();
   if (!enabled && current) await disable();
+}
+
+export async function onTrayLaunchError(handler: (message: string) => void): Promise<() => void> {
+  if (!isTauriRuntime()) return () => undefined;
+  return listen<string>("tray-launch-error", (event) => handler(event.payload));
 }

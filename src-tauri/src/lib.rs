@@ -8,17 +8,24 @@ use installed_apps::InstalledApp;
 use launcher::LauncherResult;
 use serde::Serialize;
 use std::{
-    net::{TcpStream, ToSocketAddrs},
+    collections::HashSet,
+    net::{SocketAddr, TcpStream, ToSocketAddrs},
+    sync::mpsc,
+    thread,
     time::{Duration, Instant},
 };
 use store::{AppRule, AppSettings, AppStore, PersistedState};
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
-    tray::TrayIconBuilder,
-    Manager,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager,
 };
 use tool_proxy::GitProxyStatus;
+
+const TRAY_LAUNCH_ERROR_EVENT: &str = "tray-launch-error";
+const PROXY_TEST_TIMEOUT: Duration = Duration::from_secs(3);
+const MAX_PROXY_PROBE_ADDRESSES: usize = 4;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,7 +65,14 @@ fn save_settings(
     ) {
         return Err("不支持的主题色".into());
     }
-    let updated = store.update(|state| state.settings = settings)?;
+    let mut proxy_changed = false;
+    let updated = store.update(|state| {
+        proxy_changed = state.settings.proxy_url != settings.proxy_url;
+        state.settings = settings;
+    })?;
+    if proxy_changed {
+        let _ = launcher::sync_proxy_url(&app, &updated.settings.proxy_url);
+    }
     refresh_tray_menu(&app, &updated)?;
     Ok(updated)
 }
@@ -243,6 +257,7 @@ fn remove_rule(
     app: tauri::AppHandle,
 ) -> Result<PersistedState, String> {
     let updated = store.update(|state| state.rules.retain(|rule| rule.id != id))?;
+    let _ = launcher::remove_launcher_files(&app, &id);
     refresh_tray_menu(&app, &updated)?;
     Ok(updated)
 }
@@ -301,6 +316,92 @@ fn create_rule_start_menu_launcher(
     launcher::create_start_menu_launcher(&app, &rule, &proxy_url, &launcher_suffix)
 }
 
+fn order_probe_addresses(addresses: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    let mut seen = HashSet::new();
+    let mut ipv4 = Vec::new();
+    let mut ipv6 = Vec::new();
+    for address in addresses {
+        if !seen.insert(address) {
+            continue;
+        }
+        if address.is_ipv4() {
+            ipv4.push(address);
+        } else {
+            ipv6.push(address);
+        }
+    }
+    ipv4.extend(ipv6);
+    ipv4.truncate(MAX_PROXY_PROBE_ADDRESSES);
+    ipv4
+}
+
+fn probe_proxy_addresses(addresses: Vec<SocketAddr>, timeout: Duration) -> ProxyTestResult {
+    let candidates = order_probe_addresses(addresses);
+    if candidates.is_empty() {
+        return ProxyTestResult {
+            reachable: false,
+            latency_ms: None,
+            message: "找不到可用的代理地址".into(),
+        };
+    }
+
+    if candidates.len() == 1 {
+        let started = Instant::now();
+        return match TcpStream::connect_timeout(&candidates[0], timeout) {
+            Ok(_) => ProxyTestResult {
+                reachable: true,
+                latency_ms: Some(started.elapsed().as_millis()),
+                message: "本地端口可连接".into(),
+            },
+            Err(error) => ProxyTestResult {
+                reachable: false,
+                latency_ms: None,
+                message: format!("连接失败：{error}"),
+            },
+        };
+    }
+
+    let (tx, rx) = mpsc::channel();
+    let total = candidates.len();
+    for address in candidates {
+        let tx = tx.clone();
+        thread::spawn(move || {
+            let started = Instant::now();
+            let outcome = TcpStream::connect_timeout(&address, timeout)
+                .map(|_| started.elapsed().as_millis())
+                .map_err(|error| error.to_string());
+            let _ = tx.send(outcome);
+        });
+    }
+    drop(tx);
+
+    let mut last_error: Option<String> = None;
+    for _ in 0..total {
+        match rx.recv() {
+            Ok(Ok(latency_ms)) => {
+                return ProxyTestResult {
+                    reachable: true,
+                    latency_ms: Some(latency_ms),
+                    message: "本地端口可连接".into(),
+                };
+            }
+            Ok(Err(error)) => {
+                last_error = Some(error);
+            }
+            Err(_) => break,
+        }
+    }
+
+    ProxyTestResult {
+        reachable: false,
+        latency_ms: None,
+        message: format!(
+            "连接失败：{}",
+            last_error.unwrap_or_else(|| "所有解析地址均不可达".into())
+        ),
+    }
+}
+
 #[tauri::command]
 async fn test_proxy(proxy_url: String) -> Result<ProxyTestResult, String> {
     let parsed = validate_proxy_url(&proxy_url)?;
@@ -309,24 +410,14 @@ async fn test_proxy(proxy_url: String) -> Result<ProxyTestResult, String> {
 
     tauri::async_runtime::spawn_blocking(move || {
         let address = format!("{host}:{port}");
-        let socket = address
+        let addresses: Vec<SocketAddr> = address
             .to_socket_addrs()
             .map_err(|_| "无法解析代理主机".to_string())?
-            .next()
-            .ok_or_else(|| "找不到可用的代理地址".to_string())?;
-        let started = Instant::now();
-        match TcpStream::connect_timeout(&socket, Duration::from_secs(3)) {
-            Ok(_) => Ok(ProxyTestResult {
-                reachable: true,
-                latency_ms: Some(started.elapsed().as_millis()),
-                message: "本地端口可连接".into(),
-            }),
-            Err(error) => Ok(ProxyTestResult {
-                reachable: false,
-                latency_ms: None,
-                message: format!("连接失败：{error}"),
-            }),
+            .collect();
+        if addresses.is_empty() {
+            return Err("找不到可用的代理地址".to_string());
         }
+        Ok(probe_proxy_addresses(addresses, PROXY_TEST_TIMEOUT))
     })
     .await
     .map_err(|error| error.to_string())?
@@ -386,6 +477,14 @@ fn tray_icon() -> Image<'static> {
     Image::new_owned(rgba, info.width, info.height)
 }
 
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 fn build_tray_menu(
     app: &tauri::AppHandle,
     state: &PersistedState,
@@ -395,10 +494,16 @@ fn build_tray_menu(
     menu.append(&show)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
 
-    if !state.rules.is_empty() {
+    let pinned_rules: Vec<_> = state
+        .rules
+        .iter()
+        .filter(|rule| rule.pinned)
+        .take(12)
+        .collect();
+    if !pinned_rules.is_empty() {
         let heading = MenuItem::with_id(app, "apps-heading", "常用应用", false, None::<&str>)?;
         menu.append(&heading)?;
-        for rule in state.rules.iter().filter(|rule| rule.pinned).take(12) {
+        for rule in pinned_rules {
             let item = MenuItem::with_id(
                 app,
                 format!("launch:{}", rule.id),
@@ -448,20 +553,36 @@ pub fn run() {
                 .tooltip("应用代理")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_main_window(tray.app_handle());
                     }
+                })
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => show_main_window(app),
                     "quit" => app.exit(0),
                     id if id.starts_with("launch:") => {
-                        let rule_id = id.trim_start_matches("launch:");
-                        let store = app.state::<AppStore>();
-                        if let Ok((rule, proxy_url, _)) = launcher_rule(&store, rule_id) {
-                            let _ = launcher::launch_with_proxy(app, &rule, &proxy_url);
-                        }
+                        let rule_id = id.trim_start_matches("launch:").to_string();
+                        let app_handle = app.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            let store = app_handle.state::<AppStore>();
+                            let result =
+                                launcher_rule(&store, &rule_id).and_then(|(rule, proxy_url, _)| {
+                                    launcher::launch_with_proxy(&app_handle, &rule, &proxy_url)
+                                });
+                            if let Err(error) = result {
+                                show_main_window(&app_handle);
+                                let _ = app_handle.emit(
+                                    TRAY_LAUNCH_ERROR_EVENT,
+                                    format!("托盘启动失败：{error}"),
+                                );
+                            }
+                        });
                     }
                     _ => {}
                 })
@@ -502,9 +623,14 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        desktop_refresh_candidate, normalized_product_name, tray_icon, validate_proxy_url,
+        desktop_refresh_candidate, normalized_product_name, order_probe_addresses,
+        probe_proxy_addresses, tray_icon, validate_proxy_url,
     };
     use crate::{installed_apps::InstalledApp, store::AppRule};
+    use std::{
+        net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener},
+        time::Duration,
+    };
 
     #[test]
     fn removes_version_suffix_from_product_name() {
@@ -566,5 +692,41 @@ mod tests {
         assert!(validate_proxy_url("socks://127.0.0.1:7890").is_ok());
         assert!(validate_proxy_url("http://127.0.0.1:7890").is_ok());
         assert!(validate_proxy_url("https://127.0.0.1:7890").is_ok());
+    }
+
+    #[test]
+    fn order_probe_addresses_prefers_ipv4_and_deduplicates() {
+        let ipv6 = SocketAddr::from((Ipv6Addr::LOCALHOST, 7890));
+        let ipv4 = SocketAddr::from((Ipv4Addr::LOCALHOST, 7890));
+        let ordered = order_probe_addresses(vec![ipv6, ipv4, ipv6, ipv4]);
+        assert_eq!(ordered, vec![ipv4, ipv6]);
+    }
+
+    #[test]
+    fn probe_proxy_addresses_falls_back_when_first_address_is_unreachable() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let listening = listener.local_addr().unwrap();
+        let closed_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let closed = closed_listener.local_addr().unwrap();
+        drop(closed_listener);
+
+        let result = probe_proxy_addresses(vec![closed, listening], Duration::from_secs(2));
+        assert!(
+            result.reachable,
+            "expected fallback to succeed: {}",
+            result.message
+        );
+        assert!(result.latency_ms.is_some());
+    }
+
+    #[test]
+    fn probe_proxy_addresses_reports_failure_when_all_unreachable() {
+        let closed_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let closed = closed_listener.local_addr().unwrap();
+        drop(closed_listener);
+
+        let result = probe_proxy_addresses(vec![closed], Duration::from_millis(500));
+        assert!(!result.reachable);
+        assert!(result.latency_ms.is_none());
     }
 }

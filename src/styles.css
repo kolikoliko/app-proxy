@@ -133,7 +133,8 @@ button svg { flex-shrink: 0; }
 .status-item__content .status-endpoint { overflow: hidden; text-overflow: ellipsis; font-size: 14px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .status-item__arrow { margin-left: auto; flex-shrink: 0; color: var(--faint); }
 .error-banner, .success-banner, .update-banner { margin-bottom: 18px; padding: 13px 16px; border-radius: 12px; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
-.error-banner { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface-solid)); border: 1px solid color-mix(in srgb, var(--danger) 20%, var(--line)); }
+.error-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface-solid)); border: 1px solid color-mix(in srgb, var(--danger) 20%, var(--line)); }
+.error-banner .icon-button { margin: -6px -6px -6px 0; color: inherit; }
 .success-banner { position: fixed; z-index: 40; right: 24px; bottom: 20px; max-width: min(560px, calc(100vw - 100px)); margin: 0; display: flex; align-items: center; gap: 10px; color: var(--accent-dark); background: color-mix(in srgb, var(--surface-solid) 92%, transparent); border: 1px solid var(--glass-edge); box-shadow: 0 8px 32px rgb(22 45 80 / 15%); backdrop-filter: blur(20px); }
 .success-banner > svg { flex-shrink: 0; }
 .success-banner .icon-button { margin: -6px -6px -6px 0; }

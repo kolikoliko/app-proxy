@@ -114,6 +114,98 @@ pub fn create_start_menu_launcher(
     )
 }
 
+pub fn sync_proxy_url(app: &AppHandle, proxy_url: &str) -> Result<usize, String> {
+    let launchers_root = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("无法确定启动器目录：{error}"))?
+        .join("launchers");
+    sync_launchers_in_dir(&launchers_root, proxy_url)
+}
+
+pub fn remove_launcher_files(app: &AppHandle, rule_id: &str) -> Result<bool, String> {
+    let launchers_root = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("无法确定启动器目录：{error}"))?
+        .join("launchers");
+    remove_launcher_dir(&launchers_root, rule_id)
+}
+
+fn is_safe_rule_id(rule_id: &str) -> bool {
+    !rule_id.is_empty()
+        && rule_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn sync_launchers_in_dir(launchers_root: &Path, proxy_url: &str) -> Result<usize, String> {
+    validate_launcher_proxy(proxy_url)?;
+    if !launchers_root.is_dir() {
+        return Ok(0);
+    }
+
+    let entries =
+        fs::read_dir(launchers_root).map_err(|error| format!("无法读取启动器目录：{error}"))?;
+    let mut updated = 0usize;
+    let mut first_error: Option<String> = None;
+    for entry in entries.flatten() {
+        let directory = entry.path();
+        if !directory.is_dir() {
+            continue;
+        }
+        let config_path = directory.join("launcher.json");
+        if !config_path.is_file() {
+            continue;
+        }
+        let Ok(raw) = fs::read_to_string(&config_path) else {
+            continue;
+        };
+        let Ok(mut config) = serde_json::from_str::<LauncherConfig>(&raw) else {
+            continue;
+        };
+        if config.proxy_url != proxy_url {
+            config.proxy_url = proxy_url.to_string();
+            match serde_json::to_string_pretty(&config)
+                .map_err(|error| error.to_string())
+                .and_then(|config_json| {
+                    fs::write(&config_path, config_json)
+                        .map_err(|error| format!("无法同步启动器配置：{error}"))
+                }) {
+                Ok(()) => updated += 1,
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                    continue;
+                }
+            }
+        }
+        let script = directory.join("Launch-With-Proxy.ps1");
+        if script.is_file() {
+            let _ = write_utf8_bom(&script, RUNTIME_SCRIPT);
+            let resumer = directory.join("Resume-Packaged-App.ps1");
+            let _ = write_utf8_bom(&resumer, PACKAGE_THREAD_RESUMER_SCRIPT);
+        }
+    }
+    if let Some(error) = first_error {
+        return Err(error);
+    }
+    Ok(updated)
+}
+
+fn remove_launcher_dir(launchers_root: &Path, rule_id: &str) -> Result<bool, String> {
+    if !is_safe_rule_id(rule_id) {
+        return Err("无效的应用规则标识".into());
+    }
+    let directory = launchers_root.join(rule_id);
+    if !directory.exists() {
+        return Ok(false);
+    }
+    fs::remove_dir_all(&directory).map_err(|error| format!("无法清理启动器目录：{error}"))?;
+    Ok(true)
+}
+
 fn create_launcher_shortcut(
     rule: &AppRule,
     proxy_url: &str,
@@ -213,6 +305,9 @@ fn write_launcher_files(
     proxy_url: &str,
 ) -> Result<LauncherFiles, String> {
     validate_launcher_proxy(proxy_url)?;
+    if !is_safe_rule_id(&rule.id) {
+        return Err("无效的应用规则标识".into());
+    }
     let chromium_mode = is_chromium_like(rule);
     let executable_path = normalized_launcher_executable(rule, chromium_mode);
     if rule.package_family_name.is_none() && !Path::new(&executable_path).is_file() {
@@ -495,11 +590,31 @@ function Show-LauncherMessage([string]$Message, [string]$Title, [int]$Icon) {
 }
 
 function Test-TcpPort([string]$HostName, [int]$Port) {
-  $client = [Net.Sockets.TcpClient]::new()
-  try {
-    $task = $client.ConnectAsync($HostName, $Port)
-    return $task.Wait(1800) -and $client.Connected
-  } catch { return $false } finally { $client.Dispose() }
+  $addresses = try {
+    [Net.Dns]::GetHostAddresses($HostName)
+  } catch {
+    @()
+  }
+  if (-not $addresses -or $addresses.Count -eq 0) {
+    return $false
+  }
+  $ordered = @(
+    @($addresses | Where-Object { $_.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork }) +
+    @($addresses | Where-Object { $_.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork })
+  )
+  foreach ($address in $ordered) {
+    $client = [Net.Sockets.TcpClient]::new($address.AddressFamily)
+    try {
+      $task = $client.ConnectAsync($address, $Port)
+      if ($task.Wait(1800) -and $client.Connected) {
+        return $true
+      }
+    } catch {
+    } finally {
+      $client.Dispose()
+    }
+  }
+  return $false
 }
 
 function Start-PackagedApplication(
@@ -719,8 +834,8 @@ try {
   $target = $targetInfo.Path
   $proxy = [Uri]$config.proxyUrl
   if (-not $proxy.IsAbsoluteUri -or $proxy.Port -le 0) { throw '代理地址格式无效' }
-  if (-not (Test-TcpPort $proxy.Host $proxy.Port)) {
-    Show-LauncherMessage "代理端口 $($proxy.Host):$($proxy.Port) 不可用。请先启动 Clash / Mihomo。" "$($config.displayName) Proxy" 16
+  if (-not (Test-TcpPort $proxy.DnsSafeHost $proxy.Port)) {
+    Show-LauncherMessage "代理端口 $($proxy.Host):$($proxy.Port) 不可用。请先启动本地代理客户端。" "$($config.displayName) Proxy" 16
     exit 2
   }
 
@@ -743,10 +858,15 @@ try {
   }
 
   $hostPort = "$($proxy.Host):$($proxy.Port)"
-  if ($proxy.Scheme -in @('socks', 'socks5')) {
+  $scheme = $proxy.Scheme.ToLowerInvariant()
+  if ($scheme -in @('socks', 'socks5')) {
     $httpProxy = "http://$hostPort"
     $allProxy = "socks5://$hostPort"
     $chromiumProxy = "http=$hostPort;https=$hostPort;socks=$hostPort"
+  } elseif ($scheme -eq 'https') {
+    $httpProxy = "https://$hostPort"
+    $allProxy = $httpProxy
+    $chromiumProxy = "http=https://$hostPort;https=https://$hostPort"
   } else {
     $httpProxy = "http://$hostPort"
     $allProxy = $httpProxy
@@ -797,10 +917,11 @@ try {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_chromium_like, normalized_launcher_executable, powershell_command,
-        sanitize_shortcut_name, shortcut_icon_path, shortcut_name, start_menu_shortcut_path,
-        validate_launcher_proxy, write_utf8_bom, LauncherFiles, PACKAGE_THREAD_RESUMER_SCRIPT,
-        RUNTIME_SCRIPT, SHORTCUT_SCRIPT,
+        is_chromium_like, is_safe_rule_id, normalized_launcher_executable, powershell_command,
+        remove_launcher_dir, sanitize_shortcut_name, shortcut_icon_path, shortcut_name,
+        start_menu_shortcut_path, sync_launchers_in_dir, validate_launcher_proxy, write_utf8_bom,
+        LauncherConfig, LauncherFiles, PACKAGE_THREAD_RESUMER_SCRIPT, RUNTIME_SCRIPT,
+        SHORTCUT_SCRIPT,
     };
     use crate::store::AppRule;
     use std::path::PathBuf;
@@ -1009,5 +1130,185 @@ if ($errors.Count -gt 0) {
         );
         assert!(shortcut.is_file());
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn sync_launchers_updates_proxy_url_and_refreshes_scripts() {
+        let root = std::env::temp_dir().join(format!(
+            "app-proxy-sync-launchers-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        assert_eq!(
+            sync_launchers_in_dir(&root, "https://127.0.0.1:7891").unwrap(),
+            0
+        );
+
+        let rule_a = root.join("rule-a");
+        let rule_b = root.join("rule-b");
+        let broken = root.join("broken-dir");
+        std::fs::create_dir_all(&rule_a).unwrap();
+        std::fs::create_dir_all(&rule_b).unwrap();
+        std::fs::create_dir_all(&broken).unwrap();
+
+        let config_a = LauncherConfig {
+            display_name: "Chrome".into(),
+            executable_path: r"C:\Apps\chrome.exe".into(),
+            executable_name: "chrome.exe".into(),
+            package_family_name: None,
+            application_id: None,
+            proxy_url: "http://127.0.0.1:7890".into(),
+            chromium_mode: true,
+        };
+        let config_b = LauncherConfig {
+            display_name: "ChatGPT".into(),
+            executable_path: r"C:\Apps\ChatGPT.exe".into(),
+            executable_name: "ChatGPT.exe".into(),
+            package_family_name: Some("OpenAI.Codex_2p2nqsd0c76g0".into()),
+            application_id: Some("App".into()),
+            proxy_url: "socks://127.0.0.1:1080".into(),
+            chromium_mode: true,
+        };
+        std::fs::write(
+            rule_a.join("launcher.json"),
+            serde_json::to_string_pretty(&config_a).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(rule_a.join("Launch-With-Proxy.ps1"), b"old-script").unwrap();
+        std::fs::write(
+            rule_b.join("launcher.json"),
+            serde_json::to_string_pretty(&config_b).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(broken.join("launcher.json"), b"{not valid json").unwrap();
+
+        let updated = sync_launchers_in_dir(&root, "https://127.0.0.1:8443").unwrap();
+        assert_eq!(updated, 2);
+
+        let saved_a: LauncherConfig =
+            serde_json::from_str(&std::fs::read_to_string(rule_a.join("launcher.json")).unwrap())
+                .unwrap();
+        let saved_b: LauncherConfig =
+            serde_json::from_str(&std::fs::read_to_string(rule_b.join("launcher.json")).unwrap())
+                .unwrap();
+        assert_eq!(saved_a.proxy_url, "https://127.0.0.1:8443");
+        assert_eq!(saved_a.display_name, "Chrome");
+        assert_eq!(saved_b.proxy_url, "https://127.0.0.1:8443");
+        assert_eq!(
+            saved_b.package_family_name.as_deref(),
+            Some("OpenAI.Codex_2p2nqsd0c76g0")
+        );
+        let refreshed_script =
+            std::fs::read_to_string(rule_a.join("Launch-With-Proxy.ps1")).unwrap();
+        assert!(refreshed_script.contains("https://$hostPort"));
+        assert!(rule_a.join("Resume-Packaged-App.ps1").is_file());
+
+        // Second sync with the same proxy URL should report 0 config updates.
+        assert_eq!(
+            sync_launchers_in_dir(&root, "https://127.0.0.1:8443").unwrap(),
+            0
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn remove_launcher_dir_deletes_only_target_and_rejects_traversal() {
+        let root = std::env::temp_dir().join(format!(
+            "app-proxy-remove-launcher-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let keep = root.join("keep-id");
+        let target = root.join("remove-id_1");
+        std::fs::create_dir_all(&keep).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("launcher.json"), b"{}").unwrap();
+
+        assert!(is_safe_rule_id("remove-id_1"));
+        assert!(!is_safe_rule_id(""));
+        assert!(!is_safe_rule_id("../escape"));
+        assert!(!is_safe_rule_id(r"a\b"));
+        assert!(!is_safe_rule_id("a/b"));
+
+        assert!(remove_launcher_dir(&root, "../escape").is_err());
+        assert!(!remove_launcher_dir(&root, "missing-id").unwrap());
+        assert!(remove_launcher_dir(&root, "remove-id_1").unwrap());
+        assert!(!target.exists());
+        assert!(keep.is_dir());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn runtime_script_preserves_https_proxy_scheme() {
+        assert!(RUNTIME_SCRIPT.contains("elseif ($scheme -eq 'https')"));
+        assert!(RUNTIME_SCRIPT.contains("$httpProxy = \"https://$hostPort\""));
+        assert!(RUNTIME_SCRIPT
+            .contains("$chromiumProxy = \"http=https://$hostPort;https=https://$hostPort\""));
+        assert!(!RUNTIME_SCRIPT.contains("Clash / Mihomo"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn runtime_script_tcp_probe_connects_to_listening_ipv4_port() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let unused_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let unused_port = unused_listener.local_addr().unwrap().port();
+        drop(unused_listener);
+
+        let directory =
+            std::env::temp_dir().join(format!("app-proxy-tcp-probe-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let runtime = directory.join("Launch-With-Proxy.ps1");
+        let harness = directory.join("Test-TcpProbe.ps1");
+        write_utf8_bom(&runtime, RUNTIME_SCRIPT).unwrap();
+        write_utf8_bom(
+            &harness,
+            r#"param(
+  [Parameter(Mandatory=$true)][string]$RuntimePath,
+  [Parameter(Mandatory=$true)][int]$OpenPort,
+  [Parameter(Mandatory=$true)][int]$ClosedPort
+)
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($RuntimePath, [ref]$tokens, [ref]$errors)
+$funcAst = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-TcpPort' }, $true)
+if (-not $funcAst) { throw 'Test-TcpPort not found' }
+Invoke-Expression $funcAst.Extent.Text
+$uLocalhost = [Uri]"https://localhost:$OpenPort"
+$uIpv4 = [Uri]"http://127.0.0.1:$OpenPort"
+$uClosed = [Uri]"http://127.0.0.1:$ClosedPort"
+$r1 = Test-TcpPort $uLocalhost.DnsSafeHost $uLocalhost.Port
+$r2 = Test-TcpPort $uIpv4.DnsSafeHost $uIpv4.Port
+$r3 = Test-TcpPort $uClosed.DnsSafeHost $uClosed.Port
+Write-Output "$r1,$r2,$r3"
+"#,
+        )
+        .unwrap();
+
+        let output = powershell_command()
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(&harness)
+            .arg("-RuntimePath")
+            .arg(&runtime)
+            .arg("-OpenPort")
+            .arg(port.to_string())
+            .arg("-ClosedPort")
+            .arg(unused_port.to_string())
+            .output()
+            .unwrap();
+        drop(listener);
+        std::fs::remove_dir_all(directory).unwrap();
+
+        assert!(
+            output.status.success(),
+            "Test-TcpPort harness failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "True,True,False"
+        );
     }
 }
