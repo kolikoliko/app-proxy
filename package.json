@@ -12,6 +12,7 @@
     "version:check": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-version.ps1",
     "test": "vitest run",
     "preview": "vite preview --port 1420",
+    "readme:hero": "node scripts/generate-readme-hero.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

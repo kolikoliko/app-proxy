@@ -1,8 +1,60 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect x="32" y="32" width="448" height="448" rx="112" fill="#EAF1FF"/>
-  <g transform="translate(76 76) scale(15)" fill="none" stroke="#2563EB" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/>
-    <path d="m3.3 7 8.7 5 8.7-5"/>
-    <path d="M12 22V12"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bg-base" x1="48" y1="32" x2="464" y2="480" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1E40AF"/>
+      <stop offset="48%" stop-color="#172554"/>
+      <stop offset="100%" stop-color="#0B1224"/>
+    </linearGradient>
+    <radialGradient id="bg-glow-tr" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(392 104) rotate(135) scale(320)">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.58"/>
+      <stop offset="50%" stop-color="#2563EB" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#172554" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bg-glow-bl" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(120 420) rotate(-30) scale(260)">
+      <stop offset="0%" stop-color="#6366F1" stop-opacity="0.42"/>
+      <stop offset="100%" stop-color="#0B1224" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="border-sheen" x1="88" y1="28" x2="424" y2="484" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#BAE6FD" stop-opacity="0.72"/>
+      <stop offset="38%" stop-color="#60A5FA" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#818CF8" stop-opacity="0.38"/>
+    </linearGradient>
+    <linearGradient id="app-left-wing" x1="112" y1="392" x2="278" y2="110" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#818CF8"/>
+      <stop offset="55%" stop-color="#60A5FA"/>
+      <stop offset="100%" stop-color="#93C5FD"/>
+    </linearGradient>
+    <linearGradient id="app-right-wing" x1="224" y1="96" x2="404" y2="394" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="55%" stop-color="#E0F2FE"/>
+      <stop offset="100%" stop-color="#38BDF8"/>
+    </linearGradient>
+    <linearGradient id="app-bridge" x1="208" y1="337" x2="304" y2="337" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#67E8F9"/>
+      <stop offset="100%" stop-color="#38BDF8"/>
+    </linearGradient>
+    <linearGradient id="app-fold-shadow" x1="216" y1="168" x2="294" y2="232" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0B1224" stop-opacity="0.42"/>
+      <stop offset="100%" stop-color="#0B1224" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="28" y="28" width="456" height="456" rx="112" fill="url(#bg-base)"/>
+  <rect x="28" y="28" width="456" height="456" rx="112" fill="url(#bg-glow-tr)"/>
+  <rect x="28" y="28" width="456" height="456" rx="112" fill="url(#bg-glow-bl)"/>
+  <rect x="31" y="31" width="450" height="450" rx="109" stroke="url(#border-sheen)" stroke-width="6"/>
+
+  <g transform="translate(28 24) scale(0.89)">
+    <path
+      d="M223 116 C235 92 269 92 281 116 L296 146 L191 364 C182 383 161 392 141 386 C117 379 105 352 116 330 L223 116 Z"
+      fill="url(#app-left-wing)"
+    />
+    <path d="M228 128 L292 154 L268 206 L204 176 Z" fill="url(#app-fold-shadow)"/>
+    <path
+      d="M228 118 C240 93 274 93 286 118 L396 330 C407 352 395 379 371 386 C351 392 330 383 321 364 L228 176 C220 158 220 135 228 118 Z"
+      fill="url(#app-right-wing)"
+    />
+    <rect x="208" y="314" width="96" height="46" rx="23" fill="url(#app-bridge)"/>
+    <circle cx="280" cy="337" r="10" fill="#FFFFFF"/>
   </g>
 </svg>

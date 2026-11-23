@@ -1,8 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect x="0.5" y="0.5" width="31" height="31" rx="7" fill="#EAF1FF"/>
-  <g transform="scale(1.35)" fill="none" stroke="#2563EB" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/>
-    <path d="m3.3 7 8.7 5 8.7-5"/>
-    <path d="M12 22V12"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <defs>
+    <linearGradient id="tray-bg" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2563EB"/>
+      <stop offset="100%" stop-color="#1E3A8A"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="30" height="30" rx="8" fill="url(#tray-bg)"/>
+  <g transform="translate(1.5 1.4) scale(0.0565)">
+    <path
+      d="M223 116 C235 92 269 92 281 116 L296 146 L191 364 C182 383 161 392 141 386 C117 379 105 352 116 330 L223 116 Z"
+      fill="#93C5FD"
+    />
+    <path
+      d="M228 118 C240 93 274 93 286 118 L396 330 C407 352 395 379 371 386 C351 392 330 383 321 364 L228 176 C220 158 220 135 228 118 Z"
+      fill="#FFFFFF"
+    />
+    <rect x="208" y="314" width="96" height="46" rx="23" fill="#38BDF8"/>
   </g>
 </svg>

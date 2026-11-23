@@ -1,4 +1,4 @@
-import { ArrowUpRight, Box, Monitor, Moon, Network, Settings, Sun, Wrench } from "lucide-react";
+import { ArrowUpRight, Monitor, Moon, Network, Settings, Sun, Wrench } from "lucide-react";
 import type { ThemeMode } from "../types";
 
 export type NavigationView = "apps" | "tools" | "settings";
@@ -27,7 +27,20 @@ export function Sidebar({ theme, version, activeView, onNavigate, onThemeChange 
   return (
     <aside className="sidebar">
       <div className="brand" aria-label="应用代理">
-        <span className="brand__mark"><Box size={26} strokeWidth={1.8} /></span>
+        <span className="brand__mark" aria-hidden="true">
+          <svg viewBox="0 0 512 512" width="24" height="24" fill="none">
+            <path
+              d="M223 116 C235 92 269 92 281 116 L296 146 L191 364 C182 383 161 392 141 386 C117 379 105 352 116 330 L223 116 Z"
+              fill="currentColor"
+              fillOpacity="0.62"
+            />
+            <path
+              d="M228 118 C240 93 274 93 286 118 L396 330 C407 352 395 379 371 386 C351 392 330 383 321 364 L228 176 C220 158 220 135 228 118 Z"
+              fill="currentColor"
+            />
+            <rect x="208" y="314" width="96" height="46" rx="23" fill="currentColor" fillOpacity="0.88" />
+          </svg>
+        </span>
         <span className="brand__text">应用代理<small>APP PROXY</small></span>
       </div>
       <span className="sidebar__label">工作空间</span>
