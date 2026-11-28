@@ -482,8 +482,16 @@ fn looks_like_version_directory(path: &Path) -> bool {
     path.file_name()
         .and_then(|value| value.to_str())
         .is_some_and(|value| {
-            value.contains('.')
-                && value
+            let trimmed = value
+                .strip_prefix("app-")
+                .or_else(|| value.strip_prefix("APP-"))
+                .or_else(|| value.strip_prefix('v'))
+                .or_else(|| value.strip_prefix('V'))
+                .unwrap_or(value);
+            !trimmed.starts_with('.')
+                && !trimmed.ends_with('.')
+                && trimmed.contains('.')
+                && trimmed
                     .chars()
                     .all(|character| character.is_ascii_digit() || character == '.')
         })
@@ -520,6 +528,10 @@ fn has_chromium_runtime_files(executable_path: &Path) -> bool {
 fn is_chromium_like(rule: &AppRule) -> bool {
     if let Some(override_mode) = rule.chromium_proxy_mode {
         return override_mode;
+    }
+    // Google Gemini Windows 客户端内置安全策略，检测到 --proxy-server 命令行开关会直接拒绝启动。
+    if rule.executable_name.eq_ignore_ascii_case("gemini.exe") {
+        return false;
     }
     if rule
         .package_family_name
@@ -920,9 +932,36 @@ function Resolve-Target($Config) {
   if (-not (Test-Path -LiteralPath $Config.executablePath)) {
     throw "目标程序不存在：$($Config.executablePath)"
   }
+  $resolvedPath = $Config.executablePath
+  $resolvedScopeRoot = $null
+  $parentDir = Split-Path -Parent $resolvedPath
+  $exeName = Split-Path -Leaf $resolvedPath
+  if ($parentDir -and (Test-Path -LiteralPath $parentDir)) {
+    $parentLeaf = Split-Path -Leaf $parentDir
+    if ($parentLeaf -match '^app-\d+(?:\.\d+)+$') {
+      $resolvedScopeRoot = Split-Path -Parent $parentDir
+    } else {
+      $appDirs = @(Get-ChildItem -LiteralPath $parentDir -Directory -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -match '^app-\d+(?:\.\d+)+$'
+      } | Sort-Object {
+        try { [Version]($_.Name -replace '^app-', '') } catch { [Version]'0.0' }
+      } -Descending)
+      foreach ($dir in $appDirs) {
+        $innerExe = Join-Path $dir.FullName $exeName
+        $hasElectronRuntime = (Test-Path -LiteralPath (Join-Path $dir.FullName 'resources.pak')) -or
+          (Test-Path -LiteralPath (Join-Path $dir.FullName 'chrome_100_percent.pak')) -or
+          (Test-Path -LiteralPath (Join-Path $dir.FullName 'chrome_elf.dll'))
+        if ((Test-Path -LiteralPath $innerExe) -and $hasElectronRuntime) {
+          $resolvedPath = $innerExe
+          $resolvedScopeRoot = $parentDir
+          break
+        }
+      }
+    }
+  }
   return [PSCustomObject]@{
-    Path = $Config.executablePath
-    ScopeRoot = $null
+    Path = $resolvedPath
+    ScopeRoot = $resolvedScopeRoot
     PackageFullName = $null
     AppUserModelId = $null
   }
@@ -1386,9 +1425,12 @@ if ($errors.Count -gt 0) {
         let electron_dir = directory.join("custom-electron");
         let versioned_dir = directory.join("custom-browser");
         let version_sub = versioned_dir.join("134.0.6998.89");
+        let squirrel_dir = directory.join("custom-squirrel");
+        let squirrel_sub = squirrel_dir.join("app-1.21.1");
         let plain_dir = directory.join("plain-app");
         std::fs::create_dir_all(&electron_dir).unwrap();
         std::fs::create_dir_all(&version_sub).unwrap();
+        std::fs::create_dir_all(&squirrel_sub).unwrap();
         std::fs::create_dir_all(&plain_dir).unwrap();
 
         let electron_exe = electron_dir.join("MyNotes.exe");
@@ -1398,6 +1440,10 @@ if ($errors.Count -gt 0) {
         let browser_exe = versioned_dir.join("MyBrowser.exe");
         std::fs::write(&browser_exe, []).unwrap();
         std::fs::write(version_sub.join("resources.pak"), []).unwrap();
+
+        let squirrel_exe = squirrel_dir.join("MySquirrel.exe");
+        std::fs::write(&squirrel_exe, []).unwrap();
+        std::fs::write(squirrel_sub.join("resources.pak"), []).unwrap();
 
         let plain_exe = plain_dir.join("MyTool.exe");
         std::fs::write(&plain_exe, []).unwrap();
@@ -1411,6 +1457,16 @@ if ($errors.Count -gt 0) {
         let mut browser_rule = rule("MyBrowser.exe", None);
         browser_rule.executable_path = browser_exe.to_string_lossy().into_owned();
         assert!(is_chromium_like(&browser_rule));
+
+        let mut squirrel_rule = rule("MySquirrel.exe", None);
+        squirrel_rule.executable_path = squirrel_exe.to_string_lossy().into_owned();
+        assert!(is_chromium_like(&squirrel_rule));
+
+        let gemini_exe = squirrel_dir.join("Gemini.exe");
+        std::fs::write(&gemini_exe, []).unwrap();
+        let mut gemini_rule = rule("Gemini.exe", None);
+        gemini_rule.executable_path = gemini_exe.to_string_lossy().into_owned();
+        assert!(!is_chromium_like(&gemini_rule));
 
         let mut plain_rule = rule("MyTool.exe", None);
         plain_rule.executable_path = plain_exe.to_string_lossy().into_owned();
@@ -1522,6 +1578,74 @@ Write-Output "$r1,$r2,$r3"
         assert_eq!(
             String::from_utf8_lossy(&output.stdout).trim(),
             "True,True,False"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn runtime_script_resolves_latest_squirrel_inner_executable() {
+        let directory = std::env::temp_dir().join(format!(
+            "app-proxy-squirrel-resolve-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let app_root = directory.join("Gemini");
+        let old_ver = app_root.join("app-1.9.0");
+        let new_ver = app_root.join("app-1.10.0");
+        std::fs::create_dir_all(&old_ver).unwrap();
+        std::fs::create_dir_all(&new_ver).unwrap();
+
+        let stub = app_root.join("Gemini.exe");
+        let old_inner = old_ver.join("Gemini.exe");
+        let new_inner = new_ver.join("Gemini.exe");
+        std::fs::write(&stub, []).unwrap();
+        std::fs::write(&old_inner, []).unwrap();
+        std::fs::write(&new_inner, []).unwrap();
+        std::fs::write(old_ver.join("resources.pak"), []).unwrap();
+        std::fs::write(new_ver.join("resources.pak"), []).unwrap();
+
+        let runtime = directory.join("Launch-With-Proxy.ps1");
+        let harness = directory.join("Test-ResolveTarget.ps1");
+        write_utf8_bom(&runtime, RUNTIME_SCRIPT).unwrap();
+        write_utf8_bom(
+            &harness,
+            r#"param(
+  [Parameter(Mandatory=$true)][string]$RuntimePath,
+  [Parameter(Mandatory=$true)][string]$StubPath
+)
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($RuntimePath, [ref]$tokens, [ref]$errors)
+$funcAst = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-Target' }, $true)
+if (-not $funcAst) { throw 'Resolve-Target not found' }
+Invoke-Expression $funcAst.Extent.Text
+$cfg = [PSCustomObject]@{ packageFamilyName = $null; executablePath = $StubPath }
+$res = Resolve-Target $cfg
+Write-Output "$($res.Path)|$($res.ScopeRoot)"
+"#,
+        )
+        .unwrap();
+
+        let output = powershell_command()
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(&harness)
+            .arg("-RuntimePath")
+            .arg(&runtime)
+            .arg("-StubPath")
+            .arg(&stub)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        std::fs::remove_dir_all(&directory).unwrap();
+
+        assert!(
+            output.status.success(),
+            "Resolve-Target harness failed: {stderr}"
+        );
+        assert_eq!(
+            stdout,
+            format!("{}|{}", new_inner.display(), app_root.display())
         );
     }
 }
