@@ -58,12 +58,12 @@
 
 ## 核心特性
 
-- **按需单应用代理**：仅为目标应用进程树注入代理环境变量，并为 Chrome、Edge、VS Code、ChatGPT 等 Chromium/Electron 应用自动附加代理启动参数，**不修改 Windows 系统代理**。
-- **Win32 与 Microsoft Store 全覆盖**：自动扫描已安装的桌面软件与 MSIX/Store 应用，Store 应用支持按应用组自动覆盖包内子组件（如 ChatGPT 与 `codex.exe`）。
-- **独立快捷方式启动器**：一键生成带自定义后缀（默认 `-proxy`）的桌面与开始菜单启动器，**关闭主程序后仍可独立使用**；更改代理地址后自动同步已有启动器配置。
+- **按需单应用代理**：仅为目标应用进程树注入代理环境变量（含 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`），自动识别 Chrome、Edge、VS Code、ChatGPT、Antigravity 等 Chromium / Electron / CEF / Squirrel 应用并附加标准代理启动参数，支持每条应用规则独立切换 **自动 / 强制参数 / 仅环境** 模式，**不修改 Windows 系统代理**。
+- **Win32 与 Microsoft Store 全覆盖**：自动扫描已安装的桌面软件与 MSIX/Store 应用；Store 应用自动覆盖包内子组件（如 ChatGPT 与 `codex.exe`），Squirrel 类应用自动穿透外层跳板壳定位最新内层本体。
+- **独立快捷方式启动器**：一键生成带自定义后缀（默认 `-proxy`）的桌面与开始菜单启动器，**关闭主程序后仍可独立使用**；更改代理地址或参数模式后自动同步已有启动器配置。
 - **开发者工具代理**：内置工具代理页，可一键检测、应用或清除 Git 用户级全局代理（SOCKS 自动转为 `socks5h://` 以代理 DNS 查询）。
-- **多协议支持与连通性探测**：支持 SOCKS、HTTP、HTTPS 本地代理（默认 `http://127.0.0.1:7890`），内置多地址端口可达性与延迟检测。
-- **现代毛玻璃界面与托盘常驻**：支持浅色 / 深色 / 跟随系统外观、6 种主题色、实时搜索、系统托盘左键唤起与快捷启动、开机静默自启，以及基于 GitHub Releases 的签名应用内更新。
+- **多协议支持与连通性探测**：支持 SOCKS、HTTP、HTTPS 本地代理（默认 `http://127.0.0.1:7890`），内置 IPv4/IPv6 多地址端口可达性与延迟检测。
+- **极简一体化无边框界面**：紧凑 `920×620` 桌面布局，支持浅色 / 深炭黑 / 跟随系统外观与 6 种主题色、无割裂自绘可拖拽顶栏、系统托盘左键唤起与快捷启动、开机静默自启，以及基于 GitHub Releases 的签名应用内更新。
 
 ## 安装
 
@@ -106,7 +106,7 @@ Chrome、Edge、VS Code、ChatGPT 等采用单实例架构的应用在后台已�
 <details>
 <summary><strong>为什么个别软件使用启动器后仍不走代理？</strong></summary>
 
-本工具采用纯用户态环境变量与启动参数注入（不安装虚拟网卡驱动）。如果目标程序自身既忽略 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 环境变量，又不是 Chromium/Electron 内核且无内置代理参数，这类程序无法通过环境启动器代理。
+本工具采用纯用户态环境变量与启动参数注入（不安装虚拟网卡驱动）。如果目标程序自身既忽略 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 环境变量，又不支持 `--proxy-server` 参数（或像 Google Gemini Windows 客户端那样因内置安全策略主动拒绝 `--proxy-server` 命令行开关），这类程序无法通过环境启动器代理。对于未自动识别的 Chromium / Electron 软件，可在列表中间将模式点切换为 **强制参数** 尝试。
 </details>
 
 ## 当前限制

@@ -90,32 +90,40 @@ export function InstalledAppsDialog({ existingRules, onAdd, onBrowse, onClose }:
     }}>
       <section className="app-picker" role="dialog" aria-modal="true" aria-labelledby="app-picker-title">
         <header className="app-picker__header">
-          <div>
-            <h2 id="app-picker-title">添加应用</h2>
-            <p>从 Windows 已安装的桌面软件中选择。</p>
-          </div>
+          <h2 id="app-picker-title">添加应用</h2>
           <button type="button" className="icon-button" onClick={onClose} disabled={Boolean(addingPath)} aria-label="关闭添加应用窗口">
-            <X size={19} />
+            <X size={16} />
           </button>
         </header>
 
         <div className="app-picker__toolbar">
           <label className="search-field">
-            <Search size={17} />
-            <input ref={searchRef} aria-label="搜索已安装应用" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索应用名称或路径" />
+            <Search size={14} />
+            <input
+              ref={searchRef}
+              aria-label="搜索已安装应用"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索已安装的桌面软件或 Store 应用…"
+            />
+            {query ? (
+              <button type="button" className="search-field__clear" aria-label="清空搜索" onClick={() => setQuery("")}>
+                <X size={12} />
+              </button>
+            ) : null}
           </label>
           <button type="button" className="button" onClick={() => void loadApps()} disabled={loading}>
-            <RefreshCw size={16} className={loading ? "spin" : undefined} />刷新
+            <RefreshCw size={13} className={loading ? "spin" : undefined} />刷新
           </button>
         </div>
 
         <div className="installed-apps" role="list">
           {loading ? (
-            <div className="picker-message"><LoaderCircle className="spin" size={22} />正在读取已安装软件…</div>
+            <div className="picker-message"><LoaderCircle className="spin" size={18} />正在扫描已安装软件…</div>
           ) : error ? (
             <div className="picker-message picker-message--error">{error}</div>
           ) : visibleApps.length === 0 ? (
-            <div className="picker-message">没有找到匹配的软件，可以手动浏览 `.exe`。</div>
+            <div className="picker-message">没有找到匹配的软件，可以点击右下角手动选择 `.exe`。</div>
           ) : visibleApps.map((app) => {
             const packageAppId = app.packageFamilyName && app.applicationId
               ? `${app.packageFamilyName}!${app.applicationId}`.toLocaleLowerCase()
@@ -134,8 +142,8 @@ export function InstalledAppsDialog({ existingRules, onAdd, onBrowse, onClose }:
                     {app.displayName}
                     {app.source === "msix-package" ? (
                       <>
-                        <span className="source-badge">Microsoft Store</span>
-                        <span className="source-badge source-badge--neutral">自动包含应用组件</span>
+                        <span className="source-badge">Store</span>
+                        <span className="source-badge source-badge--neutral">包含子组件</span>
                       </>
                     ) : null}
                   </strong>
@@ -151,8 +159,8 @@ export function InstalledAppsDialog({ existingRules, onAdd, onBrowse, onClose }:
                     try { await onAdd(app); } finally { setAddingPath(null); }
                   }}
                 >
-                  {adding ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />}
-                  {added ? "已添加" : needsPathUpdate ? "更新路径" : "添加"}
+                  {adding ? <LoaderCircle className="spin" size={13} /> : added ? null : <Plus size={13} />}
+                  {added ? "已添加" : needsPathUpdate ? "更新" : "添加"}
                 </button>
               </article>
             );
@@ -160,9 +168,9 @@ export function InstalledAppsDialog({ existingRules, onAdd, onBrowse, onClose }:
         </div>
 
         <footer className="app-picker__footer">
-          <span>显示能定位到 `.exe` 的桌面软件和 Microsoft Store 应用。</span>
-          <button type="button" className="button button--quiet" onClick={onBrowse} disabled={Boolean(addingPath)}>
-            <FolderOpen size={17} />浏览其他程序
+          <span>支持 Win32 桌面程序与 Microsoft Store 应用</span>
+          <button type="button" className="button" onClick={onBrowse} disabled={Boolean(addingPath)}>
+            <FolderOpen size={14} />浏览 .exe
           </button>
         </footer>
       </section>

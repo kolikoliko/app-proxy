@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { DEFAULT_STATE } from "./defaults";
@@ -302,4 +303,40 @@ export async function syncAutostart(enabled: boolean): Promise<void> {
 export async function onTrayLaunchError(handler: (message: string) => void): Promise<() => void> {
   if (!isTauriRuntime()) return () => undefined;
   return listen<string>("tray-launch-error", (event) => handler(event.payload));
+}
+
+export async function syncWindowTheme(theme: "light" | "dark"): Promise<void> {
+  if (!isTauriRuntime()) return;
+  try {
+    await getCurrentWindow().setTheme(theme);
+  } catch {
+    // 忽略不支持动态窗口主题的系统环境
+  }
+}
+
+export async function minimizeWindow(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await getCurrentWindow().minimize();
+}
+
+export async function toggleMaximizeWindow(): Promise<boolean> {
+  if (!isTauriRuntime()) return false;
+  const win = getCurrentWindow();
+  await win.toggleMaximize();
+  return win.isMaximized();
+}
+
+export async function closeWindow(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await getCurrentWindow().close();
+}
+
+export async function isWindowMaximized(): Promise<boolean> {
+  if (!isTauriRuntime()) return false;
+  return getCurrentWindow().isMaximized();
+}
+
+export async function onWindowResized(handler: () => void): Promise<() => void> {
+  if (!isTauriRuntime()) return () => undefined;
+  return getCurrentWindow().onResized(handler);
 }

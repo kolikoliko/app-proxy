@@ -1,18 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Check,
-  CircleAlert,
-  LoaderCircle,
-  RefreshCw,
-  ShieldCheck,
-  Trash2,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, CircleAlert, LoaderCircle, RefreshCw, Trash2 } from "lucide-react";
 import gitIcon from "../assets/git.svg";
+import { isLatestRequest } from "../lib/asyncControl";
 import { applyGitProxy, clearGitProxy, getGitProxyStatus } from "../lib/bridge";
 import type { GitProxyStatus } from "../types";
+import { StatusBar } from "./StatusBar";
 
 type ToolProxyPanelProps = {
   proxyUrl: string;
+  onOpenSettings: () => void;
 };
 
 type ToolAction = "refresh" | "apply" | "clear";
@@ -26,13 +22,16 @@ function ProxyValues({ values }: { values: string[] }) {
   );
 }
 
-export function ToolProxyPanel({ proxyUrl }: ToolProxyPanelProps) {
+export function ToolProxyPanel({ proxyUrl, onOpenSettings }: ToolProxyPanelProps) {
   const [status, setStatus] = useState<GitProxyStatus>();
   const [busyAction, setBusyAction] = useState<ToolAction>();
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
+  const mounted = useRef(true);
+  const latestRequest = useRef(0);
 
   const runAction = useCallback(async (action: ToolAction) => {
+    const requestId = ++latestRequest.current;
     setBusyAction(action);
     setMessage(undefined);
     setError(undefined);
@@ -42,18 +41,24 @@ export function ToolProxyPanel({ proxyUrl }: ToolProxyPanelProps) {
         : action === "clear"
           ? await clearGitProxy()
           : await getGitProxyStatus();
+      if (!mounted.current || !isLatestRequest(requestId, latestRequest.current)) return;
       setStatus(next);
-      if (action === "apply") setMessage("已将应用代理写入 Git 全局配置");
+      if (action === "apply") setMessage("已写入 Git 全局代理配置");
       if (action === "clear") setMessage("已清除 Git 全局代理配置");
     } catch (reason) {
+      if (!mounted.current || !isLatestRequest(requestId, latestRequest.current)) return;
       setError(String(reason));
     } finally {
-      setBusyAction(undefined);
+      if (mounted.current && isLatestRequest(requestId, latestRequest.current)) {
+        setBusyAction(undefined);
+      }
     }
   }, []);
 
   useEffect(() => {
+    mounted.current = true;
     void runAction("refresh");
+    return () => { mounted.current = false; };
   }, [runAction, proxyUrl]);
 
   const configured = useMemo(
@@ -64,76 +69,53 @@ export function ToolProxyPanel({ proxyUrl }: ToolProxyPanelProps) {
 
   return (
     <section className="tools-page" aria-labelledby="tools-title">
-      <header className="page-header tools-page__header">
+      <header className="page-bar">
         <div>
-          <span className="page-kicker">DEVELOPER TOOLING</span>
           <h1 id="tools-title">工具代理</h1>
-          <p>读取并管理开发工具自己的代理配置，独立于应用启动器。</p>
+          <p className="page-bar__sub">管理开发工具自身的用户级代理配置（独立于应用启动器）。</p>
         </div>
-        <div className="proxy-source" aria-label="当前应用代理">
-          <span className="proxy-source__pulse" />
-          <span>
-            <small>应用代理源</small>
-            <code>{proxyUrl}</code>
-          </span>
-        </div>
+        <StatusBar proxyUrl={proxyUrl} onOpenSettings={onOpenSettings} />
       </header>
 
-      <div className="tool-proxy-summary" role="note">
-        <ShieldCheck size={18} />
-        <span>
-          <strong>配置作用于当前 Windows 用户</strong>
-          Git 仓库内的本地配置仍可能覆盖这里的全局设置。
-        </span>
-        <span className="scope-chip">--global</span>
-      </div>
-
-      <article className="tool-card" data-state={status?.matchesAppProxy ? "synced" : "idle"}>
-        <div className="tool-card__rail" />
+      <article className="tool-card">
         <header className="tool-card__header">
           <div className="tool-identity">
             <span className="tool-identity__icon"><img src={gitIcon} alt="" /></span>
             <span>
-              <span className="tool-identity__eyebrow">版本控制</span>
               <strong>Git</strong>
-              <small>{status?.installed ? `Git ${status.version ?? "已安装"}` : "未检测到 Git for Windows"}</small>
+              <small>{status?.installed ? `Git ${status.version ?? "已安装"} · --global` : "未检测到 Git for Windows"}</small>
             </span>
           </div>
+
           {loading ? (
-            <span className="tool-status"><LoaderCircle className="spin" size={14} />正在检测</span>
+            <span className="tool-status"><LoaderCircle className="spin" size={12} />检测中</span>
           ) : status?.installed ? (
             <span className="tool-status" data-kind={status.matchesAppProxy ? "synced" : "ready"}>
-              {status.matchesAppProxy ? <Check size={14} /> : <span className="tool-status__dot" />}
+              {status.matchesAppProxy ? <Check size={12} /> : <span className="tool-status__dot" />}
               {status.matchesAppProxy ? "已同步" : configured ? "配置不同" : "未配置"}
             </span>
           ) : (
-            <span className="tool-status" data-kind="missing"><CircleAlert size={14} />未安装</span>
+            <span className="tool-status" data-kind="missing"><CircleAlert size={12} />未安装</span>
           )}
         </header>
 
         <div className="tool-config-grid" aria-busy={Boolean(busyAction)}>
           <div className="tool-config-item">
-            <span className="tool-config-item__protocol">HTTP</span>
-            <span className="tool-config-item__content">
-              <small>http.proxy</small>
-              <ProxyValues values={status?.httpProxies ?? []} />
-            </span>
+            <span className="tool-config-item__label">http.proxy</span>
+            <ProxyValues values={status?.httpProxies ?? []} />
           </div>
           <div className="tool-config-item">
-            <span className="tool-config-item__protocol">TLS</span>
-            <span className="tool-config-item__content">
-              <small>https.proxy</small>
-              <ProxyValues values={status?.httpsProxies ?? []} />
-            </span>
+            <span className="tool-config-item__label">https.proxy</span>
+            <ProxyValues values={status?.httpsProxies ?? []} />
           </div>
         </div>
 
-        {message ? <div className="tool-feedback" data-kind="success"><Check size={15} />{message}</div> : null}
-        {error ? <div className="tool-feedback" data-kind="error"><CircleAlert size={15} />{error}</div> : null}
+        {message ? <div className="tool-feedback" data-kind="success"><Check size={14} />{message}</div> : null}
+        {error ? <div className="tool-feedback" data-kind="error"><CircleAlert size={14} />{error}</div> : null}
 
         <footer className="tool-card__footer">
           <span className="tool-card__hint">
-            SOCKS 地址写入 Git 时会使用 <code>socks5h://</code>，让 DNS 查询也经过代理。
+            SOCKS 写入时自动使用 <code>socks5h://</code> 代理 DNS；仓库本地配置优先于全局配置。
           </span>
           <div className="tool-actions">
             <button
@@ -144,36 +126,39 @@ export function ToolProxyPanel({ proxyUrl }: ToolProxyPanelProps) {
               aria-label="刷新 Git 代理状态"
               title="刷新状态"
             >
-              <RefreshCw className={busyAction === "refresh" ? "spin" : undefined} size={17} />
+              <RefreshCw className={busyAction === "refresh" ? "spin" : undefined} size={14} />
             </button>
             <button
               type="button"
-              className="button tool-clear"
+              className="button button--quiet"
               disabled={Boolean(busyAction) || !status?.installed || !configured}
               onClick={() => void runAction("clear")}
             >
-              {busyAction === "clear" ? <LoaderCircle className="spin" size={16} /> : <Trash2 size={16} />}
-              清除代理
+              {busyAction === "clear" ? <LoaderCircle className="spin" size={13} /> : <Trash2 size={13} />}
+              清除
             </button>
             <button
               type="button"
-              className="button button--primary tool-apply"
+              className="button button--primary"
               disabled={Boolean(busyAction) || !status?.installed || status.matchesAppProxy}
               onClick={() => void runAction("apply")}
             >
-              {busyAction === "apply" ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />}
-              {status?.matchesAppProxy ? "已应用" : "应用当前代理"}
+              {busyAction === "apply" ? <LoaderCircle className="spin" size={13} /> : <Check size={13} />}
+              {status?.matchesAppProxy ? "已同步" : "应用当前代理"}
             </button>
           </div>
         </footer>
       </article>
 
       <div className="tool-roadmap" aria-label="后续支持计划">
-        <span>下一步可扩展</span>
-        <span className="tool-roadmap__item">npm</span>
-        <span className="tool-roadmap__item">pnpm</span>
-        <span className="tool-roadmap__item">pip</span>
-        <span className="tool-roadmap__item">Cargo</span>
+        <span>后续计划支持：</span>
+        <code>npm</code>
+        <span>·</span>
+        <code>pnpm</code>
+        <span>·</span>
+        <code>pip</code>
+        <span>·</span>
+        <code>Cargo</code>
       </div>
     </section>
   );

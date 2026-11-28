@@ -60,12 +60,12 @@
 
 ## Features
 
-- **Per-App On-Demand Proxy**: Injects scoped proxy environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`) into the launched process tree and automatically appends Chromium/Electron proxy flags for apps like Chrome, Edge, VS Code, and ChatGPT — **without modifying Windows system proxy settings**.
-- **Win32 & Microsoft Store Support**: Discovers installed desktop programs and MSIX/Store packages automatically, covering multi-component package groups (such as ChatGPT and its bundled `codex.exe`).
-- **Standalone Shortcuts**: Generate Desktop and Start Menu launchers with a customizable suffix (default `-proxy`) that continue working even after App Proxy is closed. Existing launcher configs sync automatically whenever you change the proxy address.
+- **Per-App On-Demand Proxy**: Injects scoped proxy environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`), automatically detects Chromium / Electron / CEF / Squirrel apps (Chrome, Edge, VS Code, ChatGPT, Antigravity, etc.) to append standard proxy launch flags, and supports per-app mode toggling (**Auto / Force Flags / Env Only**) — **without modifying Windows system proxy settings**.
+- **Win32 & Microsoft Store Support**: Discovers installed desktop programs and MSIX/Store packages automatically, covers multi-component Store package groups (such as ChatGPT and its bundled `codex.exe`), and resolves Squirrel `app-x.y.z` inner executables automatically across updates.
+- **Standalone Shortcuts**: Generate Desktop and Start Menu launchers with a customizable suffix (default `-proxy`) that continue working even after App Proxy is closed. Existing launcher configs sync automatically whenever you change the proxy address or launch mode.
 - **Developer Tool Proxy**: Inspect, apply, or clear global Git proxy configuration in one click (automatically converts SOCKS URLs to `socks5h://` so DNS lookups also go through the proxy).
-- **Multi-Protocol & Connectivity Probe**: Supports local SOCKS, HTTP, and HTTPS proxies (default `http://127.0.0.1:7890`) with built-in multi-address reachability and latency testing.
-- **Modern Glass UI & System Tray**: Light, dark, and system themes, 6 accent colors, instant search, tray quick-launch & left-click restore, silent launch at login, and signed in-app updates via GitHub Releases.
+- **Multi-Protocol & Connectivity Probe**: Supports local SOCKS, HTTP, and HTTPS proxies (default `http://127.0.0.1:7890`) with built-in IPv4/IPv6 multi-address reachability and latency testing.
+- **Minimal Borderless Desktop UI**: Compact `920×620` Linear/Raycast-inspired layout with light, deep charcoal dark, and system themes, 6 accent colors, integrated draggable titlebar, tray quick-launch & left-click restore, silent launch at login, and signed in-app updates via GitHub Releases.
 
 ## Installation
 
@@ -108,7 +108,7 @@ No. Whenever you save a new proxy URL in Settings, App Proxy automatically updat
 <details>
 <summary><strong>Why doesn't a specific program use the proxy when launched?</strong></summary>
 
-App Proxy runs strictly in user mode without installing a virtual network driver. Programs that ignore `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` environment variables and do not use Chromium/Electron proxy flags cannot be proxied through environment launchers.
+App Proxy runs strictly in user mode without installing a virtual network driver. Programs that ignore standard proxy environment variables and do not accept `--proxy-server` flags (or actively reject `--proxy-server` via built-in security policies, such as the Google Gemini Windows desktop app) cannot be proxied through environment launchers. For unrecognized Chromium / Electron apps, click the mode pill in the app list to switch it to **Force Flags**.
 </details>
 
 ## Limitations

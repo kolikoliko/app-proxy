@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { CheckCircle2, X } from "lucide-react";
+import { CheckCircle2, Copy, Minus, Plus, Square, X } from "lucide-react";
 import { AppList } from "./components/AppList";
 import { InstalledAppsDialog } from "./components/InstalledAppsDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { Sidebar, type NavigationView } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { ToolProxyPanel } from "./components/ToolProxyPanel";
-import { addRule, chooseExecutable, createRuleDesktopLauncher, createRuleStartMenuLauncher, launchRuleWithProxy, loadState, onTrayLaunchError, removeRule, saveSettings, setRuleChromiumMode, syncAutostart, testProxy } from "./lib/bridge";
+import { addRule, chooseExecutable, closeWindow, createRuleDesktopLauncher, createRuleStartMenuLauncher, isTauriRuntime, isWindowMaximized, launchRuleWithProxy, loadState, minimizeWindow, onTrayLaunchError, onWindowResized, removeRule, saveSettings, setRuleChromiumMode, syncAutostart, syncWindowTheme, testProxy, toggleMaximizeWindow } from "./lib/bridge";
 import { DEFAULT_STATE } from "./lib/defaults";
 import { createSerialQueue, isLatestRequest, settleSubscription } from "./lib/asyncControl";
 import { useAppUpdater } from "./hooks/useAppUpdater";
@@ -28,12 +28,15 @@ export function App() {
   const [busyAction, setBusyAction] = useState<string>();
   const [activeView, setActiveView] = useState<NavigationView>("apps");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [maximized, setMaximized] = useState(false);
+  const desktopRuntime = isTauriRuntime();
   const stateRef = useRef(state);
   stateRef.current = state;
   const mutationQueue = useRef(createSerialQueue());
   const stateEpoch = useRef(0);
   const latestRefreshRequest = useRef(0);
   const updater = useAppUpdater(state.settings.proxyUrl, loaded);
+  const hasUpdate = updater.phase === "available" || updater.phase === "downloaded";
 
   const refreshFromBackend = useCallback(async () => {
     const requestId = ++latestRefreshRequest.current;
@@ -68,9 +71,30 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!desktopRuntime) return;
+    let disposed = false;
+    let unsubscribe: (() => void) | undefined;
+    const syncMaximized = () => {
+      void isWindowMaximized().then((value) => {
+        if (!disposed) setMaximized(value);
+      }).catch(() => undefined);
+    };
+    syncMaximized();
+    void onWindowResized(syncMaximized)
+      .then((fn) => settleSubscription(() => disposed, (assigned) => { unsubscribe = assigned; }, fn))
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      unsubscribe?.();
+    };
+  }, [desktopRuntime]);
+
   useLayoutEffect(() => {
     const updateTheme = () => {
-      document.documentElement.dataset.theme = effectiveTheme(state.settings.theme);
+      const resolved = effectiveTheme(state.settings.theme);
+      document.documentElement.dataset.theme = resolved;
+      void syncWindowTheme(resolved);
     };
     updateTheme();
     document.documentElement.dataset.accent = state.settings.accentColor ?? "blue";
@@ -191,43 +215,97 @@ export function App() {
       <Sidebar
         theme={state.settings.theme}
         version={updater.currentVersion}
+        hasUpdate={hasUpdate}
         activeView={activeView}
         onNavigate={setActiveView}
         onThemeChange={(theme) => void saveSettingsPatch({ theme })}
       />
       <main className="workspace">
-        <div className="workspace-topbar">
-          <span>工作空间 <span className="breadcrumb-divider">/</span> <strong>{activeView === "apps" ? "应用代理" : activeView === "tools" ? "工具代理" : "设置"}</strong></span>
-          <span className="workspace-label"><span />本地工作空间</span>
-        </div>
+        {desktopRuntime ? (
+          <div
+            className="window-titlebar"
+            data-tauri-drag-region
+            onDoubleClick={(event) => {
+              if (event.target === event.currentTarget) {
+                void toggleMaximizeWindow().then(setMaximized).catch(() => undefined);
+              }
+            }}
+          >
+            <div className="window-controls">
+              <button
+                type="button"
+                className="window-control"
+                aria-label="最小化窗口"
+                title="最小化"
+                onClick={() => void minimizeWindow()}
+              >
+                <Minus size={14} strokeWidth={1.6} />
+              </button>
+              <button
+                type="button"
+                className="window-control"
+                aria-label={maximized ? "还原窗口" : "最大化窗口"}
+                title={maximized ? "还原" : "最大化"}
+                onClick={() => void toggleMaximizeWindow().then(setMaximized).catch(() => undefined)}
+              >
+                {maximized ? <Copy size={12} strokeWidth={1.6} /> : <Square size={12} strokeWidth={1.6} />}
+              </button>
+              <button
+                type="button"
+                className="window-control window-control--close"
+                aria-label="隐藏到系统托盘"
+                title="隐藏到托盘"
+                onClick={() => void closeWindow()}
+              >
+                <X size={14} strokeWidth={1.7} />
+              </button>
+            </div>
+          </div>
+        ) : null}
+        <div className="workspace-scroll">
         <div className="workspace-content">
-          {error ? <div className="error-banner" role="alert">
-            <span>{error}</span>
-            <button type="button" className="icon-button" aria-label="关闭错误提示" onClick={() => setError(null)}><X size={16} /></button>
-          </div> : null}
-          {notice ? <div className="success-banner" role="status">
-            <CheckCircle2 size={18} />
-            <span>{notice}</span>
-            <button type="button" className="icon-button" aria-label="关闭操作提示" onClick={() => setNotice(null)}><X size={16} /></button>
-          </div> : null}
-          {updater.phase === "available" || updater.phase === "downloaded" ? (
+          {error ? (
+            <div className="error-banner" role="alert">
+              <span>{error}</span>
+              <button type="button" className="icon-button" aria-label="关闭错误提示" onClick={() => setError(null)}>
+                <X size={14} />
+              </button>
+            </div>
+          ) : null}
+
+          {notice ? (
+            <div className="success-banner" role="status">
+              <CheckCircle2 size={15} />
+              <span>{notice}</span>
+              <button type="button" className="icon-button" aria-label="关闭操作提示" onClick={() => setNotice(null)}>
+                <X size={14} />
+              </button>
+            </div>
+          ) : null}
+
+          {hasUpdate && activeView !== "settings" ? (
             <button type="button" className="update-banner" onClick={() => setActiveView("settings")}>
-              <span>发现应用代理 v{updater.availableVersion}，可在设置中下载并安装。</span>
-              <strong>查看更新</strong>
+              <span>发现新版本 v{updater.availableVersion}</span>
+              <strong>前往更新</strong>
             </button>
           ) : null}
+
           {activeView === "apps" ? (
             <>
-              <header className="page-header apps-page-header">
-                <span className="page-kicker">YOUR CONNECTIONS, SIMPLIFIED</span>
-                <h1>连接，自在掌控<span className="heading-dot">。</span></h1>
-                <p>为常用应用设置专属代理，让每一次启动都更从容。</p>
+              <header className="page-bar">
+                <div className="page-bar__left">
+                  <h1>应用代理</h1>
+                  <span className="count-badge">{state.rules.length}</span>
+                  <StatusBar
+                    proxyUrl={state.settings.proxyUrl}
+                    onOpenSettings={() => setActiveView("settings")}
+                  />
+                </div>
+                <button type="button" className="button button--primary" onClick={() => setPickerOpen(true)}>
+                  <Plus size={14} />
+                  添加应用
+                </button>
               </header>
-              <StatusBar
-                appCount={state.rules.length}
-                proxyUrl={state.settings.proxyUrl}
-                onOpenSettings={() => setActiveView("settings")}
-              />
               <AppList
                 rules={state.rules}
                 onAdd={() => setPickerOpen(true)}
@@ -240,13 +318,14 @@ export function App() {
               />
             </>
           ) : activeView === "tools" ? (
-            <ToolProxyPanel proxyUrl={state.settings.proxyUrl} />
+            <ToolProxyPanel proxyUrl={state.settings.proxyUrl} onOpenSettings={() => setActiveView("settings")} />
           ) : (
             <section className="settings-page" aria-labelledby="settings-title">
-              <header className="page-header">
-                <span className="page-kicker">MAKE IT YOURS</span>
-                <h1 id="settings-title">设置</h1>
-                <p>管理代理连接、外观、启动行为和应用更新。</p>
+              <header className="page-bar">
+                <div>
+                  <h1 id="settings-title">设置</h1>
+                  <p className="page-bar__sub">代理连接、快捷方式、外观与版本更新。</p>
+                </div>
               </header>
               <SettingsPanel
                 settings={state.settings}
@@ -262,7 +341,9 @@ export function App() {
             </section>
           )}
         </div>
+        </div>
       </main>
+
       {pickerOpen ? (
         <InstalledAppsDialog
           existingRules={state.rules}

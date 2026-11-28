@@ -91,11 +91,18 @@ const DEMO_RULES = [
     executableName: "Code.exe",
     pinned: true,
   },
+  {
+    id: "telegram",
+    displayName: "Telegram Desktop",
+    executablePath: "C:\\Users\\User\\AppData\\Roaming\\Telegram Desktop\\Telegram.exe",
+    executableName: "Telegram.exe",
+    pinned: true,
+  },
 ];
 
 async function captureAppViews(browser, baseUrl, theme) {
   const page = await browser.newPage({
-    viewport: { width: 1120, height: 740 },
+    viewport: { width: 920, height: 620 },
     deviceScaleFactor: 2,
   });
 
@@ -127,8 +134,10 @@ async function captureAppViews(browser, baseUrl, theme) {
   await page.locator(".app-row img").first().waitFor();
   await page.waitForTimeout(250);
 
-  // 替换为高辨识度的示例应用图标
+  // 替换为高辨识度的示例应用图标，并模拟桌面端无边框顶栏的留白高度
   await page.evaluate((icons) => {
+    const content = document.querySelector(".workspace-content");
+    if (content) content.style.paddingTop = "38px";
     document.querySelectorAll(".app-row").forEach((row) => {
       const name = row.querySelector("strong")?.textContent?.trim();
       const img = row.querySelector(".app-glyph--native img");
@@ -143,8 +152,8 @@ async function captureAppViews(browser, baseUrl, theme) {
 
   // 切换到工具代理页，截取 Git 卡片用于右下角景深叠放
   await page.getByRole("button", { name: "工具代理", exact: true }).click();
-  await page.getByText("已同步", { exact: true }).waitFor();
-  await page.waitForTimeout(350);
+  await page.getByText("已同步", { exact: true }).first().waitFor();
+  await page.waitForTimeout(300);
   const toolCardBuffer = await page.locator(".tool-card").screenshot({ type: "png" });
 
   await page.close();
@@ -177,7 +186,7 @@ async function composeHero(browser, { theme, mainBuffer, toolCardBuffer, appIcon
   const cardDataUrl = `data:image/png;base64,${toolCardBuffer.toString("base64")}`;
 
   const page = await browser.newPage({
-    viewport: { width: 1440, height: 910 },
+    viewport: { width: 1280, height: 820 },
     deviceScaleFactor: 1.5,
   });
 
@@ -188,77 +197,64 @@ async function composeHero(browser, { theme, mainBuffer, toolCardBuffer, appIcon
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
-    width: 1440px;
-    height: 910px;
+    width: 1280px;
+    height: 820px;
     background: transparent;
     overflow: hidden;
     font-family: "Segoe UI Variable Text", "Microsoft YaHei UI", system-ui, sans-serif;
   }
   .stage {
     position: relative;
-    width: 1440px;
-    height: 910px;
-    padding: 28px 34px 44px;
+    width: 1280px;
+    height: 820px;
+    padding: 26px 34px 40px;
   }
   .desktop-frame {
     position: relative;
-    width: 1216px;
-    border-radius: 28px;
+    width: 1060px;
+    border-radius: 22px;
     overflow: hidden;
     background: ${
       isDark
-        ? "radial-gradient(ellipse at 18% 12%, #1e3a8a 0%, transparent 52%), radial-gradient(ellipse at 88% 18%, #0e7490 0%, transparent 48%), radial-gradient(ellipse at 52% 96%, #312e81 0%, transparent 56%), linear-gradient(145deg, #0b1224 0%, #111c33 55%, #091020 100%)"
-        : "radial-gradient(ellipse at 14% 12%, #93c5fd 0%, transparent 52%), radial-gradient(ellipse at 88% 16%, #a5f3fc 0%, transparent 50%), radial-gradient(ellipse at 55% 98%, #c7d2fe 0%, transparent 55%), linear-gradient(145deg, #dbeafe 0%, #eff6ff 55%, #e0e7ff 100%)"
+        ? "linear-gradient(155deg, #0c0d10 0%, #151820 55%, #0e1015 100%)"
+        : "linear-gradient(155deg, #eef0f4 0%, #e4e8f0 55%, #edf0f5 100%)"
     };
-    border: 1.5px solid ${isDark ? "rgba(186, 230, 253, 0.22)" : "rgba(255, 255, 255, 0.92)"};
+    border: 1px solid ${isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(15, 23, 42, 0.08)"};
     box-shadow: ${
       isDark
-        ? "0 28px 66px rgba(2, 6, 23, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.14)"
-        : "0 26px 60px rgba(30, 58, 138, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.92)"
+        ? "0 28px 66px rgba(0, 0, 0, 0.65)"
+        : "0 24px 56px rgba(15, 23, 42, 0.12)"
     };
-    padding: 34px 38px 34px;
+    padding: 36px 40px 36px;
   }
   .window {
+    position: relative;
     width: 100%;
-    border-radius: 16px;
+    border-radius: 12px;
     overflow: hidden;
-    border: 1px solid ${isDark ? "rgba(186, 230, 253, 0.18)" : "rgba(255, 255, 255, 0.95)"};
+    border: 1px solid ${isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(15, 23, 42, 0.1)"};
     box-shadow: ${
       isDark
-        ? "0 24px 60px rgba(0, 5, 18, 0.58)"
-        : "0 22px 54px rgba(23, 47, 94, 0.18)"
+        ? "0 24px 60px rgba(0, 0, 0, 0.62)"
+        : "0 20px 50px rgba(15, 23, 42, 0.14)"
     };
-    background: ${isDark ? "#111a29" : "#eaf0f7"};
+    background: ${isDark ? "#141518" : "#ffffff"};
   }
-  .titlebar {
-    height: 36px;
+  .window__controls {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 32px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 0 12px 0 14px;
-    background: ${isDark ? "#141f31" : "#f4f7fc"};
-    border-bottom: 1px solid ${isDark ? "rgba(155, 183, 218, 0.14)" : "rgba(110, 135, 168, 0.16)"};
+    color: ${isDark ? "#949ba8" : "#5c6270"};
+    font-size: 11px;
   }
-  .titlebar__left {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: ${isDark ? "#dbe7f7" : "#253248"};
-    font-size: 12px;
-    font-weight: 600;
-  }
-  .titlebar__icon {
-    width: 18px;
-    height: 18px;
-    display: block;
-  }
-  .titlebar__controls {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    color: ${isDark ? "#94a3b8" : "#64748b"};
-    font-size: 12px;
-    padding-right: 4px;
+  .window__controls span {
+    width: 38px;
+    height: 32px;
+    display: grid;
+    place-items: center;
   }
   .window__body {
     display: block;
@@ -267,38 +263,37 @@ async function composeHero(browser, { theme, mainBuffer, toolCardBuffer, appIcon
   }
   .floating-card {
     position: absolute;
-    right: 32px;
-    bottom: 34px;
-    width: 470px;
-    border-radius: 20px;
+    right: 30px;
+    bottom: 30px;
+    width: 448px;
+    border-radius: 14px;
     overflow: hidden;
-    border: 1.5px solid ${isDark ? "rgba(186, 230, 253, 0.24)" : "rgba(219, 234, 254, 0.95)"};
-    background: ${isDark ? "#182438" : "#ffffff"};
+    border: 1px solid ${isDark ? "rgba(255, 255, 255, 0.14)" : "#d3d7e0"};
+    background: ${isDark ? "#191b1f" : "#ffffff"};
     box-shadow: ${
       isDark
-        ? "0 26px 64px rgba(0, 6, 20, 0.72), 0 0 0 1px rgba(56, 189, 248, 0.14)"
-        : "0 26px 56px rgba(23, 52, 108, 0.22), 0 0 0 1px rgba(37, 99, 235, 0.08)"
+        ? "0 26px 64px rgba(0, 0, 0, 0.72)"
+        : "0 22px 52px rgba(15, 23, 42, 0.18)"
     };
   }
   .floating-card__head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 16px;
+    padding: 9px 14px;
     font-size: 11px;
-    font-weight: 650;
-    letter-spacing: 0.04em;
-    color: ${isDark ? "#93c5fd" : "#1d4ed8"};
-    background: ${isDark ? "#1c2d4a" : "#f0f6ff"};
-    border-bottom: 1px solid ${isDark ? "rgba(155, 183, 218, 0.14)" : "rgba(110, 135, 168, 0.16)"};
+    font-weight: 600;
+    color: ${isDark ? "#949ba8" : "#5c6270"};
+    background: ${isDark ? "#14161a" : "#f6f7f9"};
+    border-bottom: 1px solid ${isDark ? "rgba(255, 255, 255, 0.08)" : "#e6e8ee"};
   }
   .floating-card__pill {
     font-size: 10px;
     font-weight: 600;
     padding: 2px 8px;
     border-radius: 999px;
-    color: ${isDark ? "#75d2b2" : "#15803d"};
-    background: ${isDark ? "rgba(117, 210, 178, 0.14)" : "rgba(21, 128, 61, 0.1)"};
+    color: ${isDark ? "#4ade80" : "#15803d"};
+    background: ${isDark ? "rgba(74, 222, 128, 0.12)" : "#eefbf3"};
   }
   .floating-card img {
     display: block;
@@ -311,16 +306,10 @@ async function composeHero(browser, { theme, mainBuffer, toolCardBuffer, appIcon
   <div class="stage">
     <div class="desktop-frame">
       <div class="window">
-        <div class="titlebar">
-          <div class="titlebar__left">
-            <span class="titlebar__icon">${appIconSvg}</span>
-            <span>应用代理</span>
-          </div>
-          <div class="titlebar__controls">
-            <span>&#x2013;</span>
-            <span>&#x25A1;</span>
-            <span>&#x2715;</span>
-          </div>
+        <div class="window__controls">
+          <span>&#x2013;</span>
+          <span>&#x25A1;</span>
+          <span>&#x2715;</span>
         </div>
         <img class="window__body" src="${mainDataUrl}" alt="App Proxy" />
       </div>
@@ -328,8 +317,8 @@ async function composeHero(browser, { theme, mainBuffer, toolCardBuffer, appIcon
 
     <div class="floating-card">
       <div class="floating-card__head">
-        <span>DEVELOPER TOOLING · 工具代理</span>
-        <span class="floating-card__pill">一键同步</span>
+        <span>工具代理 · Git</span>
+        <span class="floating-card__pill">已同步</span>
       </div>
       <img src="${cardDataUrl}" alt="Git Tool Proxy" />
     </div>
