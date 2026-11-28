@@ -1,6 +1,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { chromium } from "playwright-core";
 
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "..");
@@ -46,31 +47,67 @@ function svgDataUrl(svg) {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
-// 简洁的纯矢量示例应用图标（仅用于展示截图的真实视觉效果）
-const DEMO_APP_ICONS = {
-  ChatGPT: svgDataUrl(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#10A37F"/><g fill="none" stroke="#fff" stroke-width="2.1" stroke-linejoin="round"><circle cx="20" cy="20" r="8.5"/><path d="M20 11.5v17M12.6 15.8l14.8 8.4M27.4 15.8l-14.8 8.4"/></g></svg>`,
-  ),
+// 兜底矢量图标（仅当本机未安装对应应用时使用；Windows 本机优先提取真实应用图标）
+const FALLBACK_APP_ICONS = {
   "Google Chrome": svgDataUrl(
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><circle cx="20" cy="20" r="15" fill="#EA4335"/><path d="M20 20L33 12.5A15 15 0 0 1 20 35Z" fill="#FBBC05"/><path d="M20 20L20 35A15 15 0 0 1 7 12.5Z" fill="#34A853"/><circle cx="20" cy="20" r="6.8" fill="#fff"/><circle cx="20" cy="20" r="5" fill="#4285F4"/></svg>`,
   ),
   Antigravity: svgDataUrl(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><defs><linearGradient id="ag" x1="6" y1="32" x2="34" y2="8" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#EA4335"/><stop offset="100%" stop-color="#FBBC05"/></linearGradient></defs><rect width="40" height="40" rx="10" fill="#F8FAFC"/><path d="M11.5 29.5C15 17 17.6 11 20 11s5 6 8.5 18.5c-3.8-4.5-6.4-6.4-8.5-6.4s-4.7 1.9-8.5 6.4Z" fill="url(#ag)"/></svg>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><defs><linearGradient id="ag" x1="8" y1="30" x2="32" y2="10" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#34A853"/><stop offset="35%" stop-color="#4285F4"/><stop offset="70%" stop-color="#EA4335"/><stop offset="100%" stop-color="#FBBC05"/></linearGradient></defs><path d="M11 30C15 16 17.6 9.5 20 9.5S25 16 29 30c-3.8-4.8-6.6-6.8-9-6.8s-5.2 2-9 6.8Z" fill="url(#ag)"/></svg>`,
+  ),
+  ChatGPT: svgDataUrl(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><g fill="none" stroke="#111318" stroke-width="2.2" stroke-linejoin="round"><circle cx="20" cy="20" r="9.5"/><path d="M20 10.5v19M11.8 15.2l16.4 9.6M28.2 15.2l-16.4 9.6"/></g></svg>`,
   ),
 };
 
+function loadNativeAppIcons() {
+  if (process.platform !== "win32") return FALLBACK_APP_ICONS;
+  try {
+    const script = `
+Add-Type -AssemblyName System.Drawing
+$pkg = Get-AppxPackage -ErrorAction SilentlyContinue | Where-Object { $_.PackageFamilyName -eq 'OpenAI.Codex_2p2nqsd0c76g0' } | Select-Object -First 1
+$targets = @{
+  'Google Chrome' = @(
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+  ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+  'Antigravity' = @(
+    (Join-Path $env:LOCALAPPDATA 'Programs\\antigravity\\Antigravity.exe'),
+    'C:\\Program Files\\Antigravity\\Antigravity.exe'
+  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+  'ChatGPT' = if ($pkg -and $pkg.InstallLocation) { Join-Path $pkg.InstallLocation 'app\\ChatGPT.exe' } else { $null }
+}
+$result = @{}
+foreach ($name in $targets.Keys) {
+  $p = $targets[$name]
+  if (-not $p -or -not (Test-Path -LiteralPath $p)) { continue }
+  $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($p)
+  if (-not $icon) { continue }
+  $bmp = $icon.ToBitmap()
+  $ms = New-Object System.IO.MemoryStream
+  $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+  $result[$name] = 'data:image/png;base64,' + [Convert]::ToBase64String($ms.ToArray())
+  $ms.Dispose()
+  $bmp.Dispose()
+  $icon.Dispose()
+}
+$result | ConvertTo-Json -Compress
+`;
+    const stdout = execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+      { encoding: "utf8" },
+    ).trim();
+    const extracted = stdout ? JSON.parse(stdout) : {};
+    return { ...FALLBACK_APP_ICONS, ...extracted };
+  } catch {
+    return FALLBACK_APP_ICONS;
+  }
+}
+
+const DEMO_APP_ICONS = loadNativeAppIcons();
+
 const DEMO_RULES = [
-  {
-    id: "chatgpt",
-    displayName: "ChatGPT",
-    executablePath: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.1120.6357.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe",
-    executableName: "ChatGPT.exe",
-    packageFamilyName: "OpenAI.Codex_2p2nqsd0c76g0",
-    applicationId: "App",
-    executableScopeRoot: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.1120.6357.0_x64__2p2nqsd0c76g0",
-    scopeExecutableCount: 21,
-    pinned: true,
-  },
   {
     id: "chrome",
     displayName: "Google Chrome",
@@ -83,6 +120,17 @@ const DEMO_RULES = [
     displayName: "Antigravity",
     executablePath: "C:\\Users\\User\\AppData\\Local\\Programs\\antigravity\\Antigravity.exe",
     executableName: "Antigravity.exe",
+    pinned: true,
+  },
+  {
+    id: "chatgpt",
+    displayName: "ChatGPT",
+    executablePath: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.1120.6357.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe",
+    executableName: "ChatGPT.exe",
+    packageFamilyName: "OpenAI.Codex_2p2nqsd0c76g0",
+    applicationId: "App",
+    executableScopeRoot: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.1120.6357.0_x64__2p2nqsd0c76g0",
+    scopeExecutableCount: 21,
     pinned: true,
   },
 ];
