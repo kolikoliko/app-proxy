@@ -54,14 +54,8 @@ const DEMO_APP_ICONS = {
   "Google Chrome": svgDataUrl(
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><circle cx="20" cy="20" r="15" fill="#EA4335"/><path d="M20 20L33 12.5A15 15 0 0 1 20 35Z" fill="#FBBC05"/><path d="M20 20L20 35A15 15 0 0 1 7 12.5Z" fill="#34A853"/><circle cx="20" cy="20" r="6.8" fill="#fff"/><circle cx="20" cy="20" r="5" fill="#4285F4"/></svg>`,
   ),
-  "Visual Studio Code": svgDataUrl(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#007ACC"/><path d="M28.5 10.5l-13.2 12-5.3-4-2 1.6 4.7 4.4-4.7 4.4 2 1.6 5.3-4 13.2 12 4-1.9V12.4l-4-1.9zm0 6.5v11l-6.8-5.5 6.8-5.5z" fill="#fff"/></svg>`,
-  ),
-  "Telegram Desktop": svgDataUrl(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="#29A9EB"/><path d="M28.2 13.2l-3.1 14.8c-.2 1-.8 1.2-1.7.8l-4.6-3.4-2.2 2.1c-.2.2-.5.5-1 .5l.3-4.7 8.6-7.8c.4-.3-.1-.5-.6-.2l-10.6 6.7-4.6-1.4c-1-.3-1-1 .2-1.5l17.9-6.9c.8-.3 1.6.2 1.2 1z" fill="#fff"/></svg>`,
-  ),
-  Discord: svgDataUrl(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#5865F2"/><path d="M27.3 13.8a15 15 0 0 0-3.8-1.2l-.5 1a14 14 0 0 0-6 0l-.5-1a15 15 0 0 0-3.8 1.2C10.3 17.4 9.7 21 10 24.5a15.3 15.3 0 0 0 4.6 2.3l1-1.6a10 10 0 0 1-1.6-.8l.4-.3a11 11 0 0 0 11.2 0l.4.3a10 10 0 0 1-1.6.8l1 1.6a15.3 15.3 0 0 0 4.6-2.3c.4-4-.6-7.6-2.7-10.7zM16.7 22.4c-.9 0-1.6-.8-1.6-1.8s.7-1.8 1.6-1.8 1.6.8 1.6 1.8-.7 1.8-1.6 1.8zm6.6 0c-.9 0-1.6-.8-1.6-1.8s.7-1.8 1.6-1.8 1.6.8 1.6 1.8-.7 1.8-1.6 1.8z" fill="#fff"/></svg>`,
+  Antigravity: svgDataUrl(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><defs><linearGradient id="ag" x1="6" y1="32" x2="34" y2="8" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#EA4335"/><stop offset="100%" stop-color="#FBBC05"/></linearGradient></defs><rect width="40" height="40" rx="10" fill="#F8FAFC"/><path d="M11.5 29.5C15 17 17.6 11 20 11s5 6 8.5 18.5c-3.8-4.5-6.4-6.4-8.5-6.4s-4.7 1.9-8.5 6.4Z" fill="url(#ag)"/></svg>`,
   ),
 };
 
@@ -69,12 +63,12 @@ const DEMO_RULES = [
   {
     id: "chatgpt",
     displayName: "ChatGPT",
-    executablePath: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.901.1978.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe",
+    executablePath: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.1120.6357.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe",
     executableName: "ChatGPT.exe",
     packageFamilyName: "OpenAI.Codex_2p2nqsd0c76g0",
     applicationId: "App",
-    executableScopeRoot: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.901.1978.0_x64__2p2nqsd0c76g0",
-    scopeExecutableCount: 12,
+    executableScopeRoot: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.1120.6357.0_x64__2p2nqsd0c76g0",
+    scopeExecutableCount: 21,
     pinned: true,
   },
   {
@@ -85,17 +79,10 @@ const DEMO_RULES = [
     pinned: true,
   },
   {
-    id: "vscode",
-    displayName: "Visual Studio Code",
-    executablePath: "C:\\Users\\User\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
-    executableName: "Code.exe",
-    pinned: true,
-  },
-  {
-    id: "telegram",
-    displayName: "Telegram Desktop",
-    executablePath: "C:\\Users\\User\\AppData\\Roaming\\Telegram Desktop\\Telegram.exe",
-    executableName: "Telegram.exe",
+    id: "antigravity",
+    displayName: "Antigravity",
+    executablePath: "C:\\Users\\User\\AppData\\Local\\Programs\\antigravity\\Antigravity.exe",
+    executableName: "Antigravity.exe",
     pinned: true,
   },
 ];

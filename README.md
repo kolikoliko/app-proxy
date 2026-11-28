@@ -58,7 +58,7 @@
 
 ## 核心特性
 
-- **按需单应用代理**：仅为目标应用进程树注入代理环境变量（含 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`），自动识别 Chrome、Edge、VS Code、ChatGPT、Antigravity 等 Chromium / Electron / CEF / Squirrel 应用并附加标准代理启动参数，支持每条应用规则独立切换 **自动 / 强制参数 / 仅环境** 模式，**不修改 Windows 系统代理**。
+- **按需单应用代理**：仅为目标应用进程树注入代理环境变量（含 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`），自动识别 Chrome、ChatGPT、Antigravity 等 Chromium / Electron / CEF / Squirrel 应用并附加标准代理启动参数，支持每条应用规则独立切换 **自动 / 强制参数 / 仅环境** 模式，**不修改 Windows 系统代理**。
 - **Win32 与 Microsoft Store 全覆盖**：自动扫描已安装的桌面软件与 MSIX/Store 应用；Store 应用自动覆盖包内子组件（如 ChatGPT 与 `codex.exe`），Squirrel 类应用自动穿透外层跳板壳定位最新内层本体。
 - **独立快捷方式启动器**：一键生成带自定义后缀（默认 `-proxy`）的桌面与开始菜单启动器，**关闭主程序后仍可独立使用**；更改代理地址或参数模式后自动同步已有启动器配置。
 - **开发者工具代理**：内置工具代理页，可一键检测、应用或清除 Git 用户级全局代理（SOCKS 自动转为 `socks5h://` 以代理 DNS 查询）。

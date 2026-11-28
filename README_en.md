@@ -60,7 +60,7 @@
 
 ## Features
 
-- **Per-App On-Demand Proxy**: Injects scoped proxy environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`), automatically detects Chromium / Electron / CEF / Squirrel apps (Chrome, Edge, VS Code, ChatGPT, Antigravity, etc.) to append standard proxy launch flags, and supports per-app mode toggling (**Auto / Force Flags / Env Only**) — **without modifying Windows system proxy settings**.
+- **Per-App On-Demand Proxy**: Injects scoped proxy environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`), automatically detects Chromium / Electron / CEF / Squirrel apps (such as Chrome, ChatGPT, and Antigravity) to append standard proxy launch flags, and supports per-app mode toggling (**Auto / Force Flags / Env Only**) — **without modifying Windows system proxy settings**.
 - **Win32 & Microsoft Store Support**: Discovers installed desktop programs and MSIX/Store packages automatically, covers multi-component Store package groups (such as ChatGPT and its bundled `codex.exe`), and resolves Squirrel `app-x.y.z` inner executables automatically across updates.
 - **Standalone Shortcuts**: Generate Desktop and Start Menu launchers with a customizable suffix (default `-proxy`) that continue working even after App Proxy is closed. Existing launcher configs sync automatically whenever you change the proxy address or launch mode.
 - **Developer Tool Proxy**: Inspect, apply, or clear global Git proxy configuration in one click (automatically converts SOCKS URLs to `socks5h://` so DNS lookups also go through the proxy).
