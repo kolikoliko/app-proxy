@@ -939,7 +939,7 @@ function Resolve-Target($Config) {
   if ($parentDir -and (Test-Path -LiteralPath $parentDir)) {
     $parentLeaf = Split-Path -Leaf $parentDir
     if ($parentLeaf -match '^app-\d+(?:\.\d+)+$') {
-      $resolvedScopeRoot = Split-Path -Parent $parentDir
+      $resolvedScopeRoot = Split-Path -Parent (Get-Item -LiteralPath $parentDir).FullName
     } else {
       $appDirs = @(Get-ChildItem -LiteralPath $parentDir -Directory -ErrorAction SilentlyContinue | Where-Object {
         $_.Name -match '^app-\d+(?:\.\d+)+$'
@@ -953,7 +953,7 @@ function Resolve-Target($Config) {
           (Test-Path -LiteralPath (Join-Path $dir.FullName 'chrome_elf.dll'))
         if ((Test-Path -LiteralPath $innerExe) -and $hasElectronRuntime) {
           $resolvedPath = $innerExe
-          $resolvedScopeRoot = $parentDir
+          $resolvedScopeRoot = Split-Path -Parent $dir.FullName
           break
         }
       }
@@ -1635,6 +1635,16 @@ Write-Output "$($res.Path)|$($res.ScopeRoot)"
             .arg(&stub)
             .output()
             .unwrap();
+        let expected_inner = std::fs::canonicalize(&new_inner)
+            .unwrap()
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_string();
+        let expected_root = std::fs::canonicalize(&app_root)
+            .unwrap()
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_string();
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         std::fs::remove_dir_all(&directory).unwrap();
@@ -1643,9 +1653,6 @@ Write-Output "$($res.Path)|$($res.ScopeRoot)"
             output.status.success(),
             "Resolve-Target harness failed: {stderr}"
         );
-        assert_eq!(
-            stdout,
-            format!("{}|{}", new_inner.display(), app_root.display())
-        );
+        assert_eq!(stdout, format!("{expected_inner}|{expected_root}"));
     }
 }
